@@ -219,6 +219,13 @@ window.__webAgentVerify()
 """.strip()
 
 
+def _missing_upload_file(files: list[str] | None) -> str:
+    for raw_path in files or []:
+        if not Path(str(raw_path or "")).expanduser().is_file():
+            return str(raw_path)
+    return ""
+
+
 def _task_kind(raw: Any) -> TaskKind:
     try:
         return TaskKind(str(raw))
@@ -368,6 +375,15 @@ class WebOperator:
         protocol_action = Action(kind=kind, target=target, value=value, risk=risk, reason=reason, metadata=metadata)
         validate_action(protocol_action, user_confirmed=user_confirmed)
 
+        if backend_kind in {"upload", "upload_chooser"}:
+            missing_file = _missing_upload_file(files)
+            if missing_file:
+                result = BrowserResult(ok=False, action=backend_kind, error=f"upload file not found: {missing_file}")
+                self.journal.add_action(protocol_action)
+                self.journal.add_failure({"action": asdict(protocol_action), "evidence": result.error, "recovery": "provide an existing local file path"})
+                self.journal.add_verification(Verification(passed=False, evidence=result.error))
+                return result
+
         baseline: dict[str, dict[str, int]] = {}
         started_at_ns = time.time_ns()
         if kind == "download":
@@ -502,6 +518,17 @@ class WebOperator:
         return path
 
 
+def build_snapshot(operator: WebOperator) -> dict[str, Any]:
+    page = operator.observe(summary="snapshot captured")
+    dom = asdict(page)
+    return {
+        "dom": dom,
+        "framework": dict(page.context.get("framework") or {}),
+        "stores": list(page.context.get("stores") or []),
+        "network": list(page.network or []),
+    }
+
+
 def distill_workflow(journal_payload: dict[str, Any]) -> str:
     task = str(journal_payload.get("task") or "")
     plan = journal_payload.get("plan") or {}
@@ -612,6 +639,15 @@ def _cmd_observe(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_snapshot(args: argparse.Namespace) -> int:
+    operator = _operator(args)
+    snapshot = build_snapshot(operator)
+    if args.journal:
+        operator.save_journal(Path(args.journal))
+    _print_json(snapshot)
+    return 0
+
+
 def _cmd_act(args: argparse.Namespace) -> int:
     operator = _operator(args)
     files = list(args.file or [])
@@ -715,6 +751,10 @@ def build_parser() -> argparse.ArgumentParser:
     observe = sub.add_parser("observe", help="Get a normalized page model")
     _add_browser_args(observe)
     observe.set_defaults(func=_cmd_observe)
+
+    snapshot = sub.add_parser("snapshot", help="Get DOM, framework, store, and network clues for probe planning")
+    _add_browser_args(snapshot)
+    snapshot.set_defaults(func=_cmd_snapshot)
 
     act = sub.add_parser("act", help="Run one safe browser action")
     _add_browser_args(act)

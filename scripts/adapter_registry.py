@@ -8,6 +8,7 @@ import json
 import re
 import shutil
 import zipfile
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -64,10 +65,43 @@ class AdapterRegistry:
         self._adapters: dict[str, dict[str, Any]] = {}
         self._adapter_dirs: dict[str, Path] = {}
         self._enabled: dict[str, bool] = {}
+        self._metadata: dict[str, dict[str, Any]] = {}
+
+    @property
+    def state_path(self) -> Path:
+        return self.root / "registry_state.json"
+
+    def _load_state(self) -> None:
+        if not self.state_path.exists():
+            return
+        try:
+            payload = json.loads(self.state_path.read_text(encoding="utf-8"))
+        except Exception:
+            return
+        adapters = payload.get("adapters") if isinstance(payload, dict) else {}
+        if not isinstance(adapters, dict):
+            return
+        for adapter_id, state in adapters.items():
+            if not isinstance(state, dict):
+                continue
+            if "enabled" in state:
+                self._enabled[str(adapter_id)] = bool(state.get("enabled"))
+            self._metadata[str(adapter_id)] = {key: value for key, value in state.items() if key != "enabled"}
+
+    def _save_state(self) -> None:
+        self.root.mkdir(parents=True, exist_ok=True)
+        adapters = {}
+        for adapter_id in sorted(set(self._enabled) | set(self._metadata)):
+            adapters[adapter_id] = {"enabled": self._enabled.get(adapter_id, True), **self._metadata.get(adapter_id, {})}
+        self.state_path.write_text(
+            json.dumps({"adapters": adapters, "updated_at": datetime.now(timezone.utc).isoformat()}, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
 
     def scan(self) -> list[dict[str, Any]]:
         adapters: dict[str, dict[str, Any]] = {}
         adapter_dirs: dict[str, Path] = {}
+        self._load_state()
         if not self.root.exists():
             self._adapters = {}
             self._adapter_dirs = {}
@@ -80,11 +114,13 @@ class AdapterRegistry:
             adapters[manifest["id"]] = manifest
             adapter_dirs[manifest["id"]] = item.resolve()
             self._enabled.setdefault(manifest["id"], True)
+            self._metadata.setdefault(manifest["id"], {})
         self._adapters = adapters
         self._adapter_dirs = adapter_dirs
         for adapter_id in list(self._enabled):
             if adapter_id not in adapters:
                 self._enabled.pop(adapter_id, None)
+                self._metadata.pop(adapter_id, None)
         return list(self._adapters.values())
 
     def list_adapters(self) -> list[dict[str, Any]]:
@@ -101,6 +137,7 @@ class AdapterRegistry:
                     "entry_url": manifest.get("entry_url") or "",
                     "task_count": len(manifest.get("tasks") or []),
                     "enabled": self._enabled.get(adapter_id, True),
+                    **self._metadata.get(adapter_id, {}),
                     "runtime_path": _safe_realpath(self._adapter_dirs.get(adapter_id, self.root / adapter_id)),
                 }
             )
@@ -135,6 +172,7 @@ class AdapterRegistry:
     def set_enabled(self, adapter_id: str, enabled: bool) -> None:
         self.get_adapter(adapter_id)
         self._enabled[adapter_id] = bool(enabled)
+        self._save_state()
 
     def resolve_relative_file(
         self,
@@ -190,6 +228,14 @@ class AdapterRegistry:
             target.symlink_to(source, target_is_directory=True)
         else:
             shutil.copytree(source, target)
+        self._metadata[manifest["id"]] = {
+            "install_mode": mode,
+            "source_path": str(source),
+            "installed_version": str(manifest.get("version") or "1.0.0"),
+            "installed_at": datetime.now(timezone.utc).isoformat(),
+        }
+        self._enabled[manifest["id"]] = True
+        self._save_state()
         self.scan()
         return manifest
 
@@ -253,6 +299,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--root", default="adapters")
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("scan")
+    install = sub.add_parser("install")
+    install.add_argument("--source", required=True)
+    install.add_argument("--mode", default="copy", choices=["copy", "link"])
+    enable = sub.add_parser("enable")
+    enable.add_argument("--adapter", required=True)
+    disable = sub.add_parser("disable")
+    disable.add_argument("--adapter", required=True)
     task = sub.add_parser("task")
     task.add_argument("--adapter", required=True)
     task.add_argument("--task", required=True)
@@ -264,6 +317,17 @@ def main(argv: list[str] | None = None) -> int:
     registry = AdapterRegistry(args.root)
     if args.command == "scan":
         print(json.dumps(registry.list_adapters(), ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "install":
+        print(json.dumps(registry.install_from_dir(args.source, mode=args.mode), ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "enable":
+        registry.set_enabled(args.adapter, True)
+        print(json.dumps({"ok": True, "adapter_id": args.adapter, "enabled": True}, ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "disable":
+        registry.set_enabled(args.adapter, False)
+        print(json.dumps({"ok": True, "adapter_id": args.adapter, "enabled": False}, ensure_ascii=False, indent=2))
         return 0
     if args.command == "task":
         print(json.dumps(registry.get_task(args.adapter, args.task), ensure_ascii=False, indent=2))

@@ -1,3 +1,4 @@
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -116,6 +117,31 @@ class AdapterRegistryTest(unittest.TestCase):
 
             self.assertFalse(result["ok"])
             self.assertIn("not logged in", result["error"])
+
+    def test_persists_enabled_state_and_install_metadata(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "adapters"
+            source = Path(tmp) / "source"
+            source.mkdir()
+            (source / "orders.js").write_text("return { success: true, data: [] }", encoding="utf-8")
+            (source / "manifest.yaml").write_text(
+                "id: demo\nname: Demo\nversion: 2.0.0\nentry_url: https://example.test\ntasks:\n  - id: orders\n    name: Orders\n    script: orders.js\n",
+                encoding="utf-8",
+            )
+            registry = AdapterRegistry(root)
+
+            installed = registry.install_from_dir(source, mode="copy")
+            registry.set_enabled("demo", False)
+            reloaded = AdapterRegistry(root)
+
+            adapters = reloaded.list_adapters()
+            state = json.loads((root / "registry_state.json").read_text(encoding="utf-8"))
+
+            self.assertEqual(installed["id"], "demo")
+            self.assertFalse(adapters[0]["enabled"])
+            self.assertEqual(adapters[0]["install_mode"], "copy")
+            self.assertEqual(adapters[0]["installed_version"], "2.0.0")
+            self.assertEqual(state["adapters"]["demo"]["source_path"], str(source.resolve()))
 
 
 if __name__ == "__main__":

@@ -198,6 +198,57 @@ class RuntimeDownloadsTest(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(result["ok"])
             self.assertEqual(Path(result["items"][0]["path"]).read_bytes(), b"xlsx")
 
+    async def test_download_clicks_enforces_min_bytes_and_expected_size(self):
+        class SmallDownloadBackend:
+            def __init__(self, download_dir):
+                self.download_dir = Path(download_dir)
+
+            def execute(self, action):
+                if action.kind == "click":
+                    (self.download_dir / "small.csv").write_bytes(b"x")
+                return BrowserResult(ok=True, action=action.kind, data={})
+
+        with tempfile.TemporaryDirectory() as downloads, tempfile.TemporaryDirectory() as artifacts:
+            manager = DownloadManager(Path(artifacts))
+
+            result = await manager.download_clicks(
+                [
+                    {
+                        "clicks": [{"x": 10, "y": 20}],
+                        "filename": "report.csv",
+                        "expected_name_regex": r"small\\.csv",
+                        "min_bytes": 2,
+                    }
+                ],
+                backend=SmallDownloadBackend(downloads),
+                download_dir=Path(downloads),
+                timeout_ms=1000,
+            )
+
+            self.assertFalse(result["ok"])
+            self.assertIn("smaller than min_bytes", result["items"][0]["error"])
+            self.assertFalse((Path(artifacts) / "report.csv").exists())
+
+        with tempfile.TemporaryDirectory() as downloads, tempfile.TemporaryDirectory() as artifacts:
+            manager = DownloadManager(Path(artifacts))
+
+            result = await manager.download_clicks(
+                [
+                    {
+                        "clicks": [{"x": 10, "y": 20}],
+                        "filename": "report.csv",
+                        "expected_name_regex": r"small\\.csv",
+                        "expected_size": 2,
+                    }
+                ],
+                backend=SmallDownloadBackend(downloads),
+                download_dir=Path(downloads),
+                timeout_ms=1000,
+            )
+
+            self.assertFalse(result["ok"])
+            self.assertIn("does not match expected_size", result["items"][0]["error"])
+
 
 if __name__ == "__main__":
     unittest.main()

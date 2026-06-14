@@ -130,18 +130,53 @@ class BrowserExecutorTest(unittest.TestCase):
             send_ws=fake_ws_send,
         )
 
-        result = asyncio.run(
-            backend.execute_async(
-                BrowserAction(kind="upload", selector="input[type=file]", files=["/tmp/report.csv"])
+        with tempfile.TemporaryDirectory() as tmp:
+            upload_file = Path(tmp) / "report.csv"
+            upload_file.write_text("id\n1\n", encoding="utf-8")
+            result = asyncio.run(
+                backend.execute_async(
+                    BrowserAction(kind="upload", selector="input[type=file]", files=[str(upload_file)])
+                )
             )
-        )
 
         self.assertTrue(result.ok)
         methods = [method for method, _ in sent]
         self.assertIn("DOM.setFileInputFiles", methods)
         upload_params = [params for method, params in sent if method == "DOM.setFileInputFiles"][0]
         self.assertEqual(upload_params["nodeId"], 7)
-        self.assertEqual(upload_params["files"], [str(Path("/tmp/report.csv").resolve())])
+        self.assertEqual(upload_params["files"], [str(upload_file.resolve())])
+
+    def test_chrome_cdp_backend_rejects_missing_upload_files_before_cdp(self):
+        sent = []
+        tabs = [
+            {
+                "id": "tab-1",
+                "type": "page",
+                "url": "https://example.test",
+                "title": "Example",
+                "webSocketDebuggerUrl": "ws://example.test/devtools/page/tab-1",
+            }
+        ]
+
+        async def fake_ws_send(ws_url, message, timeout):
+            sent.append(message["method"])
+            return {"id": message["id"], "result": {}}
+
+        backend = ChromeCDPBackend(
+            tab_id="tab-1",
+            get_json=lambda path: tabs if path == "/json" else None,
+            send_ws=fake_ws_send,
+        )
+
+        result = asyncio.run(
+            backend.execute_async(
+                BrowserAction(kind="upload", selector="input[type=file]", files=["/tmp/not-present-crawshrimp.csv"])
+            )
+        )
+
+        self.assertFalse(result.ok)
+        self.assertIn("upload file not found", result.error)
+        self.assertEqual(sent, [])
 
     def test_chrome_cdp_backend_captures_network_requests(self):
         tabs = [
@@ -370,11 +405,14 @@ class BrowserExecutorTest(unittest.TestCase):
             )
         )
         reload_result = asyncio.run(backend.execute_async(BrowserAction(kind="reload")))
-        chooser = asyncio.run(
-            backend.execute_async(
-                BrowserAction(kind="upload_chooser", clicks=[{"x": 1, "y": 2}], files=["/tmp/a.csv"])
+        with tempfile.TemporaryDirectory() as tmp:
+            upload_file = Path(tmp) / "a.csv"
+            upload_file.write_text("id\n1\n", encoding="utf-8")
+            chooser = asyncio.run(
+                backend.execute_async(
+                    BrowserAction(kind="upload_chooser", clicks=[{"x": 1, "y": 2}], files=[str(upload_file)])
+                )
             )
-        )
 
         self.assertTrue(wheel.ok)
         self.assertIn("mouseWheel", [item["params"]["type"] for item in captured_triggers])
@@ -382,7 +420,19 @@ class BrowserExecutorTest(unittest.TestCase):
         self.assertIn("Page.reload", sent_methods)
         self.assertTrue(chooser.ok)
         self.assertEqual(chooser_calls[0][0], [{"x": 1, "y": 2}])
-        self.assertEqual(chooser_calls[0][1], [str(Path("/tmp/a.csv").resolve())])
+        self.assertEqual(chooser_calls[0][1], [str(upload_file.resolve())])
+
+    def test_chrome_cdp_backend_rejects_missing_file_chooser_files_before_cdp(self):
+        backend = ChromeCDPBackend(tab_id="tab-1", get_json=lambda path: [])
+
+        result = asyncio.run(
+            backend.execute_async(
+                BrowserAction(kind="upload_chooser", clicks=[{"x": 1, "y": 2}], files=["/tmp/not-present-crawshrimp.csv"])
+            )
+        )
+
+        self.assertFalse(result.ok)
+        self.assertIn("upload file not found", result.error)
 
     def test_chrome_cdp_backend_browser_session_download_uses_temp_tab(self):
         closed = []

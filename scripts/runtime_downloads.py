@@ -429,6 +429,9 @@ class DownloadManager:
             regex_text = str(item.get("expected_name_regex") or "").strip()
             expected_url = str(item.get("expected_url") or item.get("url") or "").strip()
             item_timeout_ms = int(item.get("timeout_ms") or timeout_ms or 30000)
+            min_bytes = int(item.get("min_bytes") or item.get("minBytes") or 0)
+            expected_size_raw = item.get("expected_size", item.get("expectedSize"))
+            expected_size = int(expected_size_raw) if expected_size_raw not in (None, "") else 0
             try:
                 pattern = re.compile(regex_text, re.IGNORECASE) if regex_text else None
             except re.error:
@@ -500,6 +503,43 @@ class DownloadManager:
                 await self._maybe_call_backend_hook(backend, "close_new_tabs", baseline_tabs)
 
             if downloaded:
+                size = downloaded.stat().st_size if downloaded.exists() else 0
+                if min_bytes and size < min_bytes:
+                    try:
+                        downloaded.unlink()
+                    except Exception:
+                        pass
+                    failure = {
+                        "success": False,
+                        "label": label,
+                        "filename": filename,
+                        "url": expected_url,
+                        "error": f"downloaded file is smaller than min_bytes: {size} < {min_bytes}",
+                        "transientActions": transient_actions,
+                        "bytes": size,
+                    }
+                    results.append(failure)
+                    if strict:
+                        raise RuntimeError(failure["error"])
+                    continue
+                if expected_size and size != expected_size:
+                    try:
+                        downloaded.unlink()
+                    except Exception:
+                        pass
+                    failure = {
+                        "success": False,
+                        "label": label,
+                        "filename": filename,
+                        "url": expected_url,
+                        "error": f"downloaded file size does not match expected_size: {size} != {expected_size}",
+                        "transientActions": transient_actions,
+                        "bytes": size,
+                    }
+                    results.append(failure)
+                    if strict:
+                        raise RuntimeError(failure["error"])
+                    continue
                 artifact = self.move_download_artifact(downloaded, filename or downloaded.name)
                 results.append(
                     {

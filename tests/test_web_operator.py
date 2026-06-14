@@ -7,6 +7,7 @@ from scripts.browser_executor import BrowserResult
 from scripts.web_operator import (
     DOM_SNAPSHOT_SCRIPT,
     WebOperator,
+    build_snapshot,
     distill_workflow,
     load_journal,
     make_action_script,
@@ -256,6 +257,33 @@ class WebOperatorTest(unittest.TestCase):
 
         self.assertTrue(page.context["framework"]["react"])
         self.assertEqual(page.context["stores"][0]["id"], "orders")
+
+    def test_build_snapshot_returns_dom_framework_and_network_model(self):
+        operator = WebOperator(backend=FakeBackend(), task="观察页面")
+
+        snapshot = build_snapshot(operator)
+
+        self.assertEqual(snapshot["dom"]["url"], "https://example.test/orders")
+        self.assertIn("framework", snapshot)
+        self.assertIn("network", snapshot)
+        self.assertEqual(snapshot["framework"], snapshot["dom"]["context"].get("framework", {}))
+
+    def test_upload_action_rejects_missing_local_files_before_backend_call(self):
+        class UploadBackend(FakeBackend):
+            def execute(self, action):
+                self.actions.append(action)
+                if action.kind == "upload":
+                    return BrowserResult(ok=True, action="upload", data={})
+                return super().execute(action)
+
+        backend = UploadBackend()
+        operator = WebOperator(backend=backend, task="上传文件")
+
+        result = operator.act("upload", selector="input[type=file]", files=["/tmp/not-present-crawshrimp.csv"])
+
+        self.assertFalse(result.ok)
+        self.assertIn("upload file not found", result.error)
+        self.assertNotIn("upload", [action.kind for action in backend.actions])
 
     def test_distill_workflow_includes_adapter_draft_details(self):
         journal = {

@@ -174,12 +174,74 @@ Review `commands.json` before running. Dangerous submit, publish, send, delete, 
 '''
 
 
+def _adapter_manifest_source(commands: dict[str, Any]) -> str:
+    name = _slugify(str(commands.get("name") or "web-workflow"))
+    task = str(commands.get("task") or name).replace("\n", " ")
+    start_url = str(commands.get("start_url") or "")
+    return "\n".join(
+        [
+            f"id: {name}",
+            f"name: {task}",
+            "version: 0.1.0",
+            f"entry_url: {start_url}",
+            "tasks:",
+            f"  - id: {name}",
+            f"    name: {task}",
+            f"    script: {name}.js",
+            f"    entry_url: {start_url}",
+            "",
+        ]
+    )
+
+
+def _adapter_script_source(commands: dict[str, Any]) -> str:
+    name = _slugify(str(commands.get("name") or "web-workflow"))
+    return f"""// Adapter draft generated from a crawshrimp-skill journal.
+// Review selectors, request matchers, auth assumptions, and pagination before installing.
+const workflow = {json.dumps(commands, ensure_ascii=False, indent=2)};
+
+return {{
+  success: true,
+  data: [],
+  meta: {{
+    action: "complete",
+    has_more: false,
+    adapter_draft: true,
+    workflow_name: {json.dumps(name)}
+  }}
+}};
+"""
+
+
+def _adapter_readme_source(commands: dict[str, Any]) -> str:
+    return "\n".join(
+        [
+            "# Adapter Draft",
+            "",
+            "Review before installing this draft into a real adapter registry.",
+            "",
+            f"- Workflow: `{commands.get('name') or ''}`",
+            f"- Task: {commands.get('task') or ''}",
+            f"- Start URL: {commands.get('start_url') or ''}",
+            f"- Actions: {len(commands.get('actions') or [])}",
+            "",
+            "## Next Checks",
+            "",
+            "- Confirm login/auth assumptions.",
+            "- Replace draft script body with tested phase/runtime logic.",
+            "- Keep dangerous submit, publish, delete, payment, and bulk actions behind explicit confirmation.",
+            "",
+        ]
+    )
+
+
 def build_reusable_workflow(
     *,
     journal_path: Path,
     output_dir: Path,
     name: str = "",
     include_skill: bool = False,
+    include_adapter_draft: bool = False,
 ) -> dict[str, Any]:
     journal = _load_json(journal_path)
     workflow_name = _slugify(name or str(journal.get("task") or "web-workflow"))
@@ -193,11 +255,18 @@ def build_reusable_workflow(
     runner.chmod(0o755)
     if include_skill:
         (output_dir / "SKILL.md").write_text(_skill_source(commands), encoding="utf-8")
+    if include_adapter_draft:
+        draft_dir = output_dir / "adapter-draft"
+        draft_dir.mkdir(parents=True, exist_ok=True)
+        adapter_script = draft_dir / f"{workflow_name}.js"
+        (draft_dir / "manifest.yaml").write_text(_adapter_manifest_source(commands), encoding="utf-8")
+        adapter_script.write_text(_adapter_script_source(commands), encoding="utf-8")
+        (draft_dir / "README.md").write_text(_adapter_readme_source(commands), encoding="utf-8")
 
     return {
         "name": workflow_name,
         "output_dir": str(output_dir),
-        "files": sorted(item.name for item in output_dir.iterdir() if item.is_file()),
+        "files": sorted(str(item.relative_to(output_dir)) for item in output_dir.rglob("*") if item.is_file()),
     }
 
 
@@ -207,6 +276,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-dir", required=True)
     parser.add_argument("--name", default="")
     parser.add_argument("--include-skill", action="store_true")
+    parser.add_argument("--include-adapter-draft", action="store_true")
     return parser
 
 
@@ -217,6 +287,7 @@ def main(argv: list[str] | None = None) -> int:
         output_dir=Path(args.output_dir),
         name=args.name,
         include_skill=args.include_skill,
+        include_adapter_draft=args.include_adapter_draft,
     )
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0

@@ -121,6 +121,16 @@ def find_new_download(
     }
 
 
+def _resolve_existing_files(files: list[str]) -> tuple[list[str], str]:
+    resolved: list[str] = []
+    for raw_path in files or []:
+        path = Path(str(raw_path or "")).expanduser()
+        if not path.is_file():
+            return [], f"upload file not found: {raw_path}"
+        resolved.append(str(path.resolve()))
+    return resolved, ""
+
+
 def _json_request(url: str, *, method: str = "GET", payload: dict[str, Any] | None = None, headers: dict[str, str] | None = None, timeout: float = 30) -> JsonPayload:
     request_headers = dict(headers or {})
     data = None
@@ -977,6 +987,9 @@ class ChromeCDPBackend:
         if kind == "upload":
             if not action.files:
                 raise ValueError("CDP upload requires files.")
+            files, file_error = _resolve_existing_files(action.files)
+            if file_error:
+                return BrowserResult(ok=False, action=kind, error=file_error)
             tab = self.select_tab()
             ws_url = str(tab.get("webSocketDebuggerUrl") or "")
             if not ws_url:
@@ -984,7 +997,6 @@ class ChromeCDPBackend:
             selector = action.selector.strip()
             if not selector:
                 raise ValueError("CDP upload requires selector.")
-            files = [str(Path(path).expanduser().resolve()) for path in action.files]
             expression = f"""
 (() => {{
   const input = document.querySelector({json.dumps(selector)});
@@ -1014,11 +1026,13 @@ class ChromeCDPBackend:
                 raise ValueError("CDP file chooser upload requires files.")
             if not action.clicks:
                 raise ValueError("CDP file chooser upload requires clicks.")
+            files, file_error = _resolve_existing_files(action.files)
+            if file_error:
+                return BrowserResult(ok=False, action=kind, error=file_error)
             tab = self.select_tab()
             ws_url = str(tab.get("webSocketDebuggerUrl") or "")
             if not ws_url:
                 raise RuntimeError("Selected Chrome tab does not expose webSocketDebuggerUrl.")
-            files = [str(Path(path).expanduser().resolve()) for path in action.files]
             result = self._file_chooser_ws(ws_url, list(action.clicks), files, action.timeout_ms)
             if hasattr(result, "__await__"):
                 result = await result

@@ -167,6 +167,29 @@ class WorkflowBuilderTest(unittest.TestCase):
         self.assertIn("--wheels-json", runner)
         self.assertIn("--expected-file", runner)
 
+    def test_reusable_workflow_can_generate_adapter_draft_package(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            journal_path = Path(tmp) / "journal.json"
+            journal_path.write_text(json.dumps(self._journal(), ensure_ascii=False), encoding="utf-8")
+            output_dir = Path(tmp) / "orders-workflow"
+
+            result = build_reusable_workflow(
+                journal_path=journal_path,
+                output_dir=output_dir,
+                name="orders-report",
+                include_adapter_draft=True,
+            )
+
+            manifest = (output_dir / "adapter-draft" / "manifest.yaml").read_text(encoding="utf-8")
+            script = (output_dir / "adapter-draft" / "orders-report.js").read_text(encoding="utf-8")
+            notes = (output_dir / "adapter-draft" / "README.md").read_text(encoding="utf-8")
+
+        self.assertIn("adapter-draft/manifest.yaml", result["files"])
+        self.assertIn("id: orders-report", manifest)
+        self.assertIn("script: orders-report.js", manifest)
+        self.assertIn("success: true", script)
+        self.assertIn("Review before installing", notes)
+
 
 if __name__ == "__main__":
     unittest.main()

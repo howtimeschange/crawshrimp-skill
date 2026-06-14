@@ -180,7 +180,8 @@ class PhaseRunnerTest(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(result.shared["browser_downloads"]["items"][0]["browserSession"])
             self.assertTrue(Path(result.shared["click_downloads"]["items"][0]["path"]).is_file())
             self.assertIn("click", [action.kind for action in backend.actions])
-            self.assertEqual(backend.eval_calls[-1]["shared"]["current_id"], "A1")
+            business_eval_calls = [item for item in backend.eval_calls if item["shared"].get("current_id")]
+            self.assertEqual(business_eval_calls[-1]["shared"]["current_id"], "A1")
 
     async def test_phase_runner_reload_recovery_for_timeout_once(self):
         class RecoverBackend(PhaseBackend):
@@ -240,6 +241,30 @@ class PhaseRunnerTest(unittest.IsolatedAsyncioTestCase):
         result = await runner.run_script("return true")
 
         self.assertEqual(result.data, [{"ok": True}])
+
+    async def test_phase_runner_cleans_runtime_params_after_completion(self):
+        class CleanupBackend:
+            def __init__(self):
+                self.actions = []
+
+            def execute(self, action):
+                self.actions.append(action)
+                if action.kind == "eval" and "sessionStorage.removeItem" in action.script:
+                    return BrowserResult(ok=True, action="eval", data={"value": True})
+                return BrowserResult(
+                    ok=True,
+                    action="eval",
+                    data={"value": {"success": True, "data": [], "meta": {"action": "complete", "has_more": False}}},
+                )
+
+        backend = CleanupBackend()
+        runner = WebPhaseRunner(backend=backend, max_pages=1, max_phases=1)
+
+        await runner.run_script("return true")
+
+        cleanup_scripts = [action.script for action in backend.actions if action.kind == "eval" and "sessionStorage.removeItem" in action.script]
+        self.assertEqual(len(cleanup_scripts), 1)
+        self.assertIn("delete window.__CRAWSHRIMP_PARAMS__", cleanup_scripts[0])
 
 
 if __name__ == "__main__":
