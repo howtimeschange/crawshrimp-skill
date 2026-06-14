@@ -50,7 +50,12 @@ crawshrimp-skill/
     workflow-reuse.md
   scripts/
     __init__.py
+    adapter_registry.py
     browser_executor.py
+    knowledge_service.py
+    phase_runner.py
+    probe_bundle.py
+    runtime_downloads.py
     web_operator.py
     workflow_builder.py
     web_agent_protocol.py
@@ -100,9 +105,18 @@ The protocol must block dangerous actions unless the user explicitly confirms th
 - A Python protocol module with task classification, action safety validation, plan templates, and journal serialization.
 - A direct Chrome/CDP browser execution layer:
   - low-level tab observation, JavaScript evaluation, coordinate click, navigation, and request capture
+  - adapter/task registry and manifest-safe script resolution
+  - adapter auth-check execution through the same CDP eval channel
+  - knowledge-card rebuild/search from adapter notes and probe bundles
+  - probe bundle materialization with DOM, framework, network, endpoint, strategy, recommendations, and redacted evidence
+  - crawshrimp-style JSRunner phase/shared runtime for multi-stage workflows
+  - runtime actions for CDP clicks, file input injection, file chooser upload, click/url/wheel request capture, URL downloads, browser-session URL downloads, click downloads, reload, and abort
+  - request-capture compatibility for `matches`, `min_matches`, `settle_ms`, and `include_response_body`
   - high-level `observe / act / verify / journal / distill` commands for agents
   - DOM snapshot and action scripts inspired by crawshrimp dev harness but implemented inside this skill
   - file upload through CDP file-input primitives and download verification through artifact readback
+  - concurrent URL download artifacts with retries, progress snapshots, data URL support, existing-file skip, and temporary-tab browser-session downloads
+  - click download artifact detection with transient-tab hooks for host-specific confirmation flows
 - A workflow reuse builder:
   - reads a successful journal
   - emits `workflow.md`, `commands.json`, `run_workflow.py`, and optional `SKILL.md`

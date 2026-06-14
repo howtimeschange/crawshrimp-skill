@@ -139,6 +139,30 @@ class WebOperatorTest(unittest.TestCase):
         self.assertEqual(backend.actions[-1].files[0], str(upload_file))
         self.assertTrue(operator.journal.verifications[-1].passed)
 
+    def test_upload_chooser_and_capture_wheel_actions_reach_backend(self):
+        class RichActionBackend(FakeBackend):
+            def execute(self, action):
+                self.actions.append(action)
+                if action.kind == "upload_chooser":
+                    return BrowserResult(ok=True, action="upload_chooser", data={"fileCount": len(action.files)})
+                if action.kind == "capture":
+                    return BrowserResult(ok=True, action="capture", data={"matches": [{"url": "https://example.test/api"}]})
+                return super().execute(action)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            upload_file = Path(tmp) / "sample.txt"
+            upload_file.write_text("hello", encoding="utf-8")
+            backend = RichActionBackend()
+            operator = WebOperator(backend=backend, task="上传并捕获")
+
+            chooser = operator.act("upload-chooser", files=[str(upload_file)], clicks=[{"x": 1, "y": 2}])
+            capture = operator.act("capture-wheel", wheels=[{"x": 3, "y": 4, "delta_y": 600}], value='[{"url_contains":"/api"}]')
+
+        self.assertTrue(chooser.ok)
+        self.assertTrue(capture.ok)
+        self.assertEqual(backend.actions[-2].kind, "upload_chooser")
+        self.assertEqual(backend.actions[-1].capture_mode, "wheel")
+
     def test_download_action_waits_for_new_file_and_records_artifact(self):
         class DownloadBackend(FakeBackend):
             def __init__(self, download_dir):
@@ -207,6 +231,31 @@ class WebOperatorTest(unittest.TestCase):
         self.assertEqual(page.active_regions[0]["kind"], "dialog")
         self.assertEqual(page.accessibility[0]["role"], "button")
         self.assertEqual(page.network[0]["kind"], "resource")
+
+    def test_observe_includes_framework_snapshot(self):
+        class FrameworkBackend(FakeBackend):
+            def execute(self, action):
+                if action.kind == "eval" and action.script == DOM_SNAPSHOT_SCRIPT:
+                    return BrowserResult(
+                        ok=True,
+                        action="eval",
+                        data={
+                            "value": {
+                                "url": "https://example.test/app",
+                                "title": "App",
+                                "headings": ["App"],
+                                "buttons": [],
+                                "framework": {"react": True, "vue3": False, "nextjs": True},
+                                "stores": [{"type": "pinia", "id": "orders", "actions": ["load"], "stateKeys": ["rows"]}],
+                            }
+                        },
+                    )
+                return super().execute(action)
+
+        page = WebOperator(backend=FrameworkBackend(), task="观察框架").observe()
+
+        self.assertTrue(page.context["framework"]["react"])
+        self.assertEqual(page.context["stores"][0]["id"], "orders")
 
     def test_distill_workflow_includes_adapter_draft_details(self):
         journal = {

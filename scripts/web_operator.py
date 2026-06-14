@@ -87,6 +87,35 @@ DOM_SNAPSHOT_SCRIPT = r"""
     initiatorType: entry.initiatorType || '',
     duration: Math.round(entry.duration || 0)
   })) : []
+  const framework = {
+    vue3: !!(document.querySelector('#app')?.__vue_app__),
+    vue2: !!(document.querySelector('#app')?.__vue__),
+    react: !!window.__REACT_DEVTOOLS_GLOBAL_HOOK__ || !!document.querySelector('[data-reactroot]'),
+    nextjs: !!window.__NEXT_DATA__,
+    nuxt: !!window.__NUXT__
+  }
+  const stores = []
+  const app = document.querySelector('#app')
+  const gp = app?.__vue_app__?.config?.globalProperties
+  try {
+    if (gp?.$pinia?._s) {
+      gp.$pinia._s.forEach((store, id) => {
+        const actions = []
+        const stateKeys = []
+        for (const key in store) {
+          if (key.startsWith('$') || key.startsWith('_')) continue
+          if (typeof store[key] === 'function') actions.push(key)
+          else stateKeys.push(key)
+        }
+        stores.push({ type: 'pinia', id, actions: actions.slice(0, 12), stateKeys: stateKeys.slice(0, 12) })
+      })
+    }
+    if (gp?.$store?._modules?.root?._children) {
+      for (const [id, mod] of Object.entries(gp.$store._modules.root._children)) {
+        stores.push({ type: 'vuex', id, actions: Object.keys(mod?._rawModule?.actions || {}).slice(0, 12), stateKeys: Object.keys(mod?.state || {}).slice(0, 12) })
+      }
+    }
+  } catch (error) {}
   return {
     url: location.href,
     title: document.title,
@@ -105,6 +134,8 @@ DOM_SNAPSHOT_SCRIPT = r"""
     accessibility,
     blocking_states: blockingStates,
     resources: resourceEntries,
+    framework,
+    stores,
     tables
   }
 })()
@@ -300,10 +331,16 @@ class WebOperator:
         timeout_ms: int = 8000,
         user_confirmed: bool = False,
         files: list[str] | None = None,
+        clicks: list[dict[str, Any]] | None = None,
+        wheels: list[dict[str, Any]] | None = None,
         expected_file: str = "",
         url: str = "",
     ) -> BrowserResult:
         target = selector or text or url
+        backend_kind = {"upload-chooser": "upload_chooser", "capture-wheel": "capture_wheel"}.get(kind, kind)
+        if backend_kind == "upload_chooser" and files:
+            target = "file chooser"
+            value = ",".join(files)
         if kind == "upload" and files:
             target = selector
             value = ",".join(files)
@@ -318,7 +355,21 @@ class WebOperator:
         if kind == "download":
             baseline = snapshot_download_dir(self.download_dir)
 
-        if kind == "upload":
+        if backend_kind == "upload_chooser":
+            result = self.backend.execute(
+                BrowserAction(kind="upload_chooser", clicks=list(clicks or []), files=list(files or []), timeout_ms=timeout_ms, user_gesture=True)
+            )
+        elif backend_kind == "capture_wheel":
+            matches = []
+            if value:
+                parsed = json.loads(value)
+                if not isinstance(parsed, list):
+                    raise ValueError("capture-wheel value must be a JSON array of matchers")
+                matches = parsed
+            result = self.backend.execute(
+                BrowserAction(kind="capture", capture_mode="wheel", wheels=list(wheels or []), matches=matches, timeout_ms=timeout_ms)
+            )
+        elif kind == "upload":
             result = self.backend.execute(
                 BrowserAction(kind="upload", selector=selector, files=list(files or []), timeout_ms=timeout_ms, user_gesture=True)
             )
@@ -335,13 +386,13 @@ class WebOperator:
             self.journal.add_verification(Verification(passed=False, evidence=result.error or "action failed"))
             return result
 
-        if kind == "upload":
+        if backend_kind in {"upload", "upload_chooser"}:
             files_text = ", ".join(Path(path).name for path in (files or []))
             self.journal.add_verification(
                 Verification(
                     passed=True,
                     evidence=f"Uploaded {len(files or [])} file(s): {files_text}",
-                    check={"kind": "upload", "selector": selector, "files": list(files or [])},
+                    check={"kind": kind, "selector": selector, "files": list(files or [])},
                 )
             )
         if kind == "download":
@@ -556,6 +607,20 @@ def _cmd_act(args: argparse.Namespace) -> int:
         if not isinstance(parsed_files, list):
             raise ValueError("--files-json must be a JSON array")
         files.extend(str(item) for item in parsed_files)
+    clicks = []
+    if args.clicks_json:
+        clicks = json.loads(args.clicks_json)
+        if not isinstance(clicks, list):
+            raise ValueError("--clicks-json must be a JSON array")
+    elif args.x is not None and args.y is not None:
+        clicks = [{"x": args.x, "y": args.y}]
+    wheels = []
+    if args.wheels_json:
+        wheels = json.loads(args.wheels_json)
+        if not isinstance(wheels, list):
+            raise ValueError("--wheels-json must be a JSON array")
+    elif args.x is not None and args.y is not None and args.kind == "capture-wheel":
+        wheels = [{"x": args.x, "y": args.y, "delta_y": args.delta_y}]
     result = operator.act(
         args.kind,
         selector=args.selector,
@@ -566,6 +631,8 @@ def _cmd_act(args: argparse.Namespace) -> int:
         timeout_ms=args.timeout_ms,
         user_confirmed=args.user_confirmed,
         files=files,
+        clicks=clicks,
+        wheels=wheels,
         expected_file=args.expected_file,
         url=args.url,
     )
@@ -638,13 +705,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     act = sub.add_parser("act", help="Run one safe browser action")
     _add_browser_args(act)
-    act.add_argument("kind", choices=["click", "type", "select", "upload", "download", "wait", "navigate", "paginate"])
+    act.add_argument("kind", choices=["click", "type", "select", "upload", "upload-chooser", "download", "wait", "navigate", "paginate", "capture-wheel"])
     act.add_argument("--selector", default="")
     act.add_argument("--text", default="")
     act.add_argument("--value", default=None)
     act.add_argument("--url", default="")
     act.add_argument("--file", action="append", default=[])
     act.add_argument("--files-json", default="")
+    act.add_argument("--clicks-json", default="")
+    act.add_argument("--wheels-json", default="")
+    act.add_argument("--x", type=float, default=None)
+    act.add_argument("--y", type=float, default=None)
+    act.add_argument("--delta-y", type=float, default=600)
     act.add_argument("--expected-file", default="")
     act.add_argument("--reason", default="")
     act.add_argument("--risk", default="safe")

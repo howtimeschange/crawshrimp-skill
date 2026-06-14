@@ -37,6 +37,8 @@ python3 scripts/web_operator.py act click --url-prefix https://example.com --sel
 python3 scripts/web_operator.py act navigate --url-prefix https://example.com --url "https://example.com/report" --reason "open report page" --journal run.json
 python3 scripts/web_operator.py act paginate --url-prefix https://example.com --selector "button.next" --reason "move to next result page" --journal run.json
 python3 scripts/web_operator.py act upload --url-prefix https://example.com --selector "input[type=file]" --file ./input.csv --reason "attach import file" --journal run.json
+python3 scripts/web_operator.py act upload-chooser --url-prefix https://example.com --clicks-json '[{"x":120,"y":240}]' --file ./input.csv --reason "attach file through native chooser" --journal run.json
+python3 scripts/web_operator.py act capture-wheel --url-prefix https://example.com --wheels-json '[{"x":640,"y":520,"delta_y":900}]' --value '[{"url_contains":"/api/"}]' --reason "capture lazy-load requests" --journal run.json
 python3 scripts/web_operator.py act download --url-prefix https://example.com --selector "a.export" --expected-file report.csv --download-dir ~/Downloads --reason "download export artifact" --journal run.json
 python3 scripts/web_operator.py verify --url-prefix https://example.com --expression "document.body.innerText.includes('Export')" --evidence "export menu visible" --journal run.json
 python3 scripts/web_operator.py verify --check file-exists --target report.csv --download-dir ~/Downloads --evidence "report file exists" --journal run.json
@@ -51,6 +53,31 @@ python3 scripts/browser_executor.py cdp --url-prefix https://example.com observe
 python3 scripts/browser_executor.py cdp --url-prefix https://example.com eval --script "document.title"
 python3 scripts/browser_executor.py cdp --url-prefix https://example.com capture --capture-mode passive --matches-json '[{"url_contains":"/api/"}]'
 ```
+
+Use crawshrimp-compatible execution helpers when reusing or distilling adapter-shaped work:
+
+```bash
+python3 scripts/adapter_registry.py --root adapters scan
+python3 scripts/knowledge_service.py --adapters-root adapters --probes-root probes --data-root knowledge rebuild
+python3 scripts/knowledge_service.py --data-root knowledge search --query "export drawer" --adapter temu --task goods_traffic_detail
+python3 scripts/phase_runner.py --url-prefix https://example.com --file adapters/demo/orders.js --params-json '{"keyword":"sku"}' --artifact-dir artifacts
+```
+
+## Crawshrimp Runtime Compatibility
+
+This skill mirrors the main crawshrimp execution surfaces in reusable form:
+
+- adapter/task registry and safe manifest path resolution
+- auth check script execution
+- knowledge cards from notes and probe bundles
+- probe bundle artifacts: DOM, framework, network, endpoints, strategy, recommendations, report
+- JSRunner-style phase/shared runtime with `window.__CRAWSHRIMP_PAGE__`, `window.__CRAWSHRIMP_PHASE__`, `window.__CRAWSHRIMP_SHARED__`, and `window.__CRAWSHRIMP_PARAMS__`
+- runtime actions: `cdp_clicks`, `inject_files`, `file_chooser_upload`, `capture_click_requests`, `capture_url_requests`, `capture_wheel_requests`, `download_urls`, `download_clicks`, `reload_page`, `next_phase`, `complete`, `abort`
+- request capture options for URL/click/wheel flows: `matches`, `min_matches`, `settle_ms`, and `include_response_body`
+- URL download retries, concurrency, progress, artifact naming, existing-file skip, and data URL support
+- browser-session URL downloads through a temporary CDP tab when a file URL depends on logged-in browser state
+- click-download artifact detection with hooks for host-level transient tab handling
+- navigation retry and timeout reload recovery in the phase runner
 
 ## Supported Task Families
 

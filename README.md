@@ -23,6 +23,7 @@ This is a web-operation protocol and CDP automation skill for AI agents. Instead
 
 - `observe`：读取 URL、标题、可见文本、按钮/输入框/选择器/链接、表格、下载目录、弹窗/抽屉/浮层、危险按钮线索、资源请求线索和 accessibility-ish 控件列表。
 - `act`：小步执行 `click`、`type`、`select`、`upload`、`download`、`wait`、`navigate`、`paginate`。
+- 抓虾执行态兼容：adapter/task registry、auth check、knowledge service、probe bundle、framework/network snapshot、JSRunner 式 phase/shared runtime、file chooser 上传、wheel capture、请求捕获 `min_matches`/响应体选项、并发 URL 下载、browser-session URL 下载、点击下载 transient tab 处理和刷新恢复。
 - `verify`：支持手写 JS expression，也支持结构化断言：`text`、`url`、`selector-exists`、`table-rows-min`、`file-exists`。
 - `journal`：跨命令读取并追加同一个 JSON journal，记录 observation、action、verification、failure 和 recovery。
 - `distill`：从 journal 生成 workflow 草稿，也可以生成可复用目录：`workflow.md`、`commands.json`、`run_workflow.py`，可选生成新的 `SKILL.md`。
@@ -67,6 +68,20 @@ python3 scripts/web_operator.py act click \
   --reason "打开导出菜单" \
   --journal run.json
 
+python3 scripts/web_operator.py act upload-chooser \
+  --url-prefix https://example.com \
+  --clicks-json '[{"x":120,"y":240}]' \
+  --file ./input.csv \
+  --reason "通过原生文件选择器上传" \
+  --journal run.json
+
+python3 scripts/web_operator.py act capture-wheel \
+  --url-prefix https://example.com \
+  --wheels-json '[{"x":640,"y":520,"delta_y":900}]' \
+  --value '[{"url_contains":"/api/"}]' \
+  --reason "捕获滚动懒加载请求" \
+  --journal run.json
+
 python3 scripts/web_operator.py verify \
   --url-prefix https://example.com \
   --check text \
@@ -92,7 +107,27 @@ python3 scripts/browser_executor.py cdp \
   --url-prefix https://example.com \
   eval \
   --script "document.title"
+
+python3 scripts/browser_executor.py cdp \
+  --url-prefix https://example.com \
+  capture \
+  --capture-mode url \
+  --url https://example.com/report \
+  --matches-json '[{"url_contains":"/api/report","method":"GET"}]' \
+  --min-matches 1 \
+  --include-response-body
 ```
+
+抓虾式 adapter/knowledge/probe/phase 工具：
+
+```bash
+python3 scripts/adapter_registry.py --root adapters scan
+python3 scripts/knowledge_service.py --adapters-root adapters --probes-root probes --data-root knowledge rebuild
+python3 scripts/knowledge_service.py --data-root knowledge search --query "export drawer" --adapter temu --task goods_traffic_detail
+python3 scripts/phase_runner.py --url-prefix https://example.com --file adapters/demo/orders.js --params-json '{"keyword":"sku"}' --artifact-dir artifacts
+```
+
+`phase_runner.py` 支持抓虾脚本返回这些 `meta.action`：`cdp_clicks`、`inject_files`、`file_chooser_upload`、`capture_click_requests`、`capture_url_requests`、`capture_wheel_requests`、`download_urls`、`download_clicks`、`reload_page`、`next_phase`、`complete`、`abort`。`download_urls` 可通过 `browser_session`/`browserSession` 走临时浏览器标签页下载，适合需要登录态或浏览器下载行为的导出链接。
 
 任务分类和计划模板：
 
@@ -121,7 +156,12 @@ crawshrimp-skill/
   references/                   # 协议、观察、动作、安全、验证、沉淀文档
   scripts/
     web_agent_protocol.py       # 任务分类、计划、数据结构、安全检查、journal
+    adapter_registry.py         # 抓虾式 adapter/task manifest registry
     browser_executor.py         # 直接 Chrome/CDP 后端
+    knowledge_service.py        # notes/probe bundle 知识卡片索引与搜索
+    probe_bundle.py             # probe bundle 生成、endpoint 分析、敏感信息脱敏
+    phase_runner.py             # JSRunner 式 phase/shared 多阶段运行时
+    runtime_downloads.py        # 并发 URL 下载、点击下载、artifact 管理
     web_operator.py             # observe/act/verify/journal/distill 高层 CLI
     workflow_builder.py         # 从成功 journal 生成可复用 workflow 包
   tests/                        # unittest 测试
@@ -130,7 +170,7 @@ crawshrimp-skill/
 
 ### 当前边界
 
-这个仓库不是完整的抓虾桌面应用，也没有复刻抓虾的所有平台 adapter、GUI、任务队列、账号管理或发布流程。它先落地一层面向 AI agent 的通用网页操作协议，并用 CDP 承载第一版执行能力。对于真实平台的高风险操作，仍应坚持小步执行、读回校验和人工确认。
+这个仓库已经复刻并抽象了抓虾的主要执行态能力，但它仍不是完整的抓虾桌面应用：没有 GUI、任务队列、账号管理、数据导出 UI、平台内置 adapter 集合或桌面发布流程。真实平台任务仍应坚持小步执行、读回校验、证据 journal 和高风险动作人工确认。
 
 ## English
 
@@ -151,6 +191,7 @@ It has two goals:
 
 - `observe`: captures URL, title, visible text, controls, tables, download directory evidence, dialogs/drawers/popovers, blocking states, resource clues, and accessibility-ish controls.
 - `act`: executes small-step `click`, `type`, `select`, `upload`, `download`, `wait`, `navigate`, and `paginate` actions.
+- Crawshrimp runtime compatibility: adapter/task registry, auth check, knowledge service, probe bundle, framework/network snapshot, JSRunner-style phase/shared runtime, file chooser upload, wheel capture, request-capture `min_matches`/response-body options, concurrent URL downloads, browser-session URL downloads, click-download transient-tab handling, and refresh recovery.
 - `verify`: supports custom JavaScript expressions and structured checks: `text`, `url`, `selector-exists`, `table-rows-min`, and `file-exists`.
 - `journal`: loads and appends the same JSON journal across commands, preserving observations, actions, verifications, failures, and recovery notes.
 - `distill`: turns a journal into workflow notes or a reusable package with `workflow.md`, `commands.json`, `run_workflow.py`, and optionally a generated `SKILL.md`.
@@ -195,6 +236,20 @@ python3 scripts/web_operator.py act click \
   --reason "open export menu" \
   --journal run.json
 
+python3 scripts/web_operator.py act upload-chooser \
+  --url-prefix https://example.com \
+  --clicks-json '[{"x":120,"y":240}]' \
+  --file ./input.csv \
+  --reason "attach file through native chooser" \
+  --journal run.json
+
+python3 scripts/web_operator.py act capture-wheel \
+  --url-prefix https://example.com \
+  --wheels-json '[{"x":640,"y":520,"delta_y":900}]' \
+  --value '[{"url_contains":"/api/"}]' \
+  --reason "capture lazy-load requests" \
+  --journal run.json
+
 python3 scripts/web_operator.py verify \
   --url-prefix https://example.com \
   --check text \
@@ -220,7 +275,27 @@ python3 scripts/browser_executor.py cdp \
   --url-prefix https://example.com \
   eval \
   --script "document.title"
+
+python3 scripts/browser_executor.py cdp \
+  --url-prefix https://example.com \
+  capture \
+  --capture-mode url \
+  --url https://example.com/report \
+  --matches-json '[{"url_contains":"/api/report","method":"GET"}]' \
+  --min-matches 1 \
+  --include-response-body
 ```
+
+Crawshrimp-style adapter, knowledge, probe, and phase helpers:
+
+```bash
+python3 scripts/adapter_registry.py --root adapters scan
+python3 scripts/knowledge_service.py --adapters-root adapters --probes-root probes --data-root knowledge rebuild
+python3 scripts/knowledge_service.py --data-root knowledge search --query "export drawer" --adapter temu --task goods_traffic_detail
+python3 scripts/phase_runner.py --url-prefix https://example.com --file adapters/demo/orders.js --params-json '{"keyword":"sku"}' --artifact-dir artifacts
+```
+
+`phase_runner.py` accepts crawshrimp-style `meta.action` values: `cdp_clicks`, `inject_files`, `file_chooser_upload`, `capture_click_requests`, `capture_url_requests`, `capture_wheel_requests`, `download_urls`, `download_clicks`, `reload_page`, `next_phase`, `complete`, and `abort`. `download_urls` can set `browser_session`/`browserSession` to download through a temporary browser tab when the URL needs login cookies or native browser download behavior.
 
 Task classification and planning helpers:
 
@@ -249,7 +324,12 @@ crawshrimp-skill/
   references/                   # protocol, observation, actions, safety, verification, distillation docs
   scripts/
     web_agent_protocol.py       # task taxonomy, planning, data structures, safety, journal
+    adapter_registry.py         # crawshrimp-style adapter/task manifest registry
     browser_executor.py         # direct Chrome/CDP backend
+    knowledge_service.py        # knowledge card indexing/search from notes and probe bundles
+    probe_bundle.py             # probe bundle generation, endpoint analysis, redaction
+    phase_runner.py             # JSRunner-style phase/shared runtime
+    runtime_downloads.py        # concurrent URL downloads, click downloads, artifact management
     web_operator.py             # high-level observe/act/verify/journal/distill CLI
     workflow_builder.py         # reusable workflow package generator
   tests/                        # unittest suite
@@ -258,4 +338,4 @@ crawshrimp-skill/
 
 ### Current Limits
 
-This repository is not the full crawshrimp desktop application. It does not replicate every platform adapter, GUI workflow, task queue, account model, or release pipeline from the original crawshrimp project. V1 focuses on a general AI-agent webpage operation layer backed by CDP. Real platform work should still use small actions, readback checks, evidence journals, and explicit human confirmation before high-risk side effects.
+This repository now mirrors and abstracts the main crawshrimp runtime execution surfaces, but it is still not the full crawshrimp desktop application. It does not include the GUI, task queue, account model, data export UI, bundled platform adapters, or desktop release pipeline. Real platform work should still use small actions, readback checks, evidence journals, and explicit human confirmation before high-risk side effects.
