@@ -1,0 +1,4 @@
+interface:
+  display_name: "Crawshrimp Skill"
+  short_description: "AI agent web operation protocol"
+  default_prompt: "Use $crawshrimp-skill to explore a webpage, plan safe actions, and complete a web workflow with evidence."
