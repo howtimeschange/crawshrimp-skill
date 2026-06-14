@@ -114,6 +114,59 @@ class WorkflowBuilderTest(unittest.TestCase):
         self.assertIn("--check", runner)
         self.assertIn("--file", runner)
 
+    def test_reusable_workflow_preserves_non_selector_runtime_metadata(self):
+        journal = self._journal()
+        journal["actions"] = [
+            {
+                "kind": "upload-chooser",
+                "target": "file chooser",
+                "value": "/tmp/a.csv,/tmp/b.csv",
+                "risk": "safe",
+                "reason": "upload via chooser",
+                "metadata": {
+                    "clicks": [{"x": 10, "y": 20}],
+                    "files": ["/tmp/a.csv", "/tmp/b.csv"],
+                    "timeout_ms": 15000,
+                },
+            },
+            {
+                "kind": "capture-wheel",
+                "target": "",
+                "value": '[{"url_contains":"/api/orders"}]',
+                "risk": "safe",
+                "reason": "capture scroll request",
+                "metadata": {
+                    "wheels": [{"x": 30, "y": 40, "delta_y": 700}],
+                    "matches": [{"url_contains": "/api/orders"}],
+                },
+            },
+            {
+                "kind": "download",
+                "target": "a.export",
+                "risk": "safe",
+                "reason": "download report",
+                "metadata": {"expected_file": "orders.csv", "timeout_ms": 9000},
+            },
+        ]
+        with tempfile.TemporaryDirectory() as tmp:
+            journal_path = Path(tmp) / "journal.json"
+            journal_path.write_text(json.dumps(journal, ensure_ascii=False), encoding="utf-8")
+            output_dir = Path(tmp) / "orders-workflow"
+
+            build_reusable_workflow(journal_path=journal_path, output_dir=output_dir, name="orders-report")
+
+            commands = json.loads((output_dir / "commands.json").read_text(encoding="utf-8"))
+            runner = (output_dir / "run_workflow.py").read_text(encoding="utf-8")
+
+        self.assertEqual(commands["actions"][0]["clicks"], [{"x": 10, "y": 20}])
+        self.assertEqual(commands["actions"][0]["files"], ["/tmp/a.csv", "/tmp/b.csv"])
+        self.assertEqual(commands["actions"][1]["wheels"], [{"x": 30, "y": 40, "delta_y": 700}])
+        self.assertEqual(commands["actions"][1]["matchers"], [{"url_contains": "/api/orders"}])
+        self.assertEqual(commands["actions"][2]["expected_file"], "orders.csv")
+        self.assertIn("--clicks-json", runner)
+        self.assertIn("--wheels-json", runner)
+        self.assertIn("--expected-file", runner)
+
 
 if __name__ == "__main__":
     unittest.main()

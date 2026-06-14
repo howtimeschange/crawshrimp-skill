@@ -77,6 +77,47 @@ class RuntimeDownloadsTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(browser_calls[0][1].name, "export.xlsx")
             self.assertEqual(browser_calls[0][2], 12)
 
+    async def test_download_urls_reports_malformed_data_url_as_item_failure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = DownloadManager(Path(tmp))
+
+            result = await manager.download_urls(
+                [
+                    {"url": "data:text/plain;base64,abc", "filename": "bad.txt", "label": "bad data"},
+                    {"url": "data:text/plain;base64,b2s=", "filename": "ok.txt", "label": "good data"},
+                ],
+                concurrency=2,
+            )
+
+            self.assertFalse(result["ok"])
+            self.assertFalse(result["items"][0]["success"])
+            self.assertIn("Incorrect padding", result["items"][0]["error"])
+            self.assertTrue(result["items"][1]["success"])
+            self.assertEqual((Path(tmp) / "ok.txt").read_text(encoding="utf-8"), "ok")
+
+    async def test_download_urls_reports_throwing_fetcher_as_item_failure(self):
+        async def fake_fetch(url, target_path, headers, timeout_seconds, no_proxy, progress_callback):
+            if url.endswith("bad.txt"):
+                raise RuntimeError("fetch exploded")
+            Path(target_path).write_bytes(b"ok")
+            return {"success": True, "path": str(target_path), "bytes": 2}
+
+        with tempfile.TemporaryDirectory() as tmp:
+            manager = DownloadManager(Path(tmp), fetcher=fake_fetch)
+
+            result = await manager.download_urls(
+                [
+                    {"url": "https://example.test/bad.txt", "filename": "bad.txt", "label": "bad fetch"},
+                    {"url": "https://example.test/ok.txt", "filename": "ok.txt", "label": "good fetch"},
+                ],
+                concurrency=2,
+            )
+
+            self.assertFalse(result["ok"])
+            self.assertFalse(result["items"][0]["success"])
+            self.assertIn("fetch exploded", result["items"][0]["error"])
+            self.assertTrue(result["items"][1]["success"])
+
     async def test_download_clicks_moves_detected_file_and_records_transient_actions(self):
         class ClickBackend:
             def __init__(self, download_dir):
@@ -130,6 +171,32 @@ class RuntimeDownloadsTest(unittest.IsolatedAsyncioTestCase):
 
             self.assertFalse(result["ok"])
             self.assertIn("click failed", result["items"][0]["error"])
+
+    async def test_download_clicks_prefers_async_backend_execute(self):
+        class AsyncClickBackend:
+            def __init__(self, download_dir):
+                self.download_dir = Path(download_dir)
+
+            def execute(self, action):
+                raise RuntimeError("sync execute should not be used for click downloads")
+
+            async def execute_async(self, action):
+                if action.kind == "click":
+                    (self.download_dir / "export.xlsx").write_bytes(b"xlsx")
+                return BrowserResult(ok=True, action=action.kind, data={})
+
+        with tempfile.TemporaryDirectory() as downloads, tempfile.TemporaryDirectory() as artifacts:
+            manager = DownloadManager(Path(artifacts))
+
+            result = await manager.download_clicks(
+                [{"clicks": [{"x": 10, "y": 20}], "filename": "report.xlsx", "expected_name_regex": r"export\\.xlsx"}],
+                backend=AsyncClickBackend(downloads),
+                download_dir=Path(downloads),
+                timeout_ms=1000,
+            )
+
+            self.assertTrue(result["ok"])
+            self.assertEqual(Path(result["items"][0]["path"]).read_bytes(), b"xlsx")
 
 
 if __name__ == "__main__":

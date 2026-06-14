@@ -92,6 +92,31 @@ class AdapterRegistryTest(unittest.TestCase):
             self.assertEqual(backend.actions[0].kind, "eval")
             self.assertIn("__CRAWSHRIMP_AUTH_CHECK__", backend.actions[0].script)
 
+    def test_run_auth_check_requires_logged_in_true(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            adapter = root / "demo"
+            adapter.mkdir()
+            (adapter / "auth_check.js").write_text("return { success: true, data: [{ logged_in: false }] }", encoding="utf-8")
+            (adapter / "manifest.yaml").write_text(
+                "id: demo\nname: Demo\nentry_url: https://example.test\nauth:\n  check_script: auth_check.js\n",
+                encoding="utf-8",
+            )
+            registry = AdapterRegistry(root)
+            registry.scan()
+            backend = FakeBackend(
+                BrowserResult(
+                    ok=True,
+                    action="eval",
+                    data={"value": {"success": True, "data": [{"logged_in": False}], "meta": {"logged_in": False}}},
+                )
+            )
+
+            result = run_auth_check(registry, "demo", backend=backend)
+
+            self.assertFalse(result["ok"])
+            self.assertIn("not logged in", result["error"])
+
 
 if __name__ == "__main__":
     unittest.main()

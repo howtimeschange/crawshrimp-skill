@@ -223,6 +223,24 @@ class PhaseRunnerTest(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(ctx.exception.partial_data, [{"id": 1}])
 
+    async def test_phase_runner_prefers_async_backend_execute(self):
+        class AsyncOnlyBackend:
+            def execute(self, action):
+                raise RuntimeError("sync execute should not be called inside phase runner")
+
+            async def execute_async(self, action):
+                return BrowserResult(
+                    ok=True,
+                    action=action.kind,
+                    data={"value": {"success": True, "data": [{"ok": True}], "meta": {"action": "complete", "has_more": False}}},
+                )
+
+        runner = WebPhaseRunner(backend=AsyncOnlyBackend(), max_pages=1, max_phases=1)
+
+        result = await runner.run_script("return true")
+
+        self.assertEqual(result.data, [{"ok": True}])
+
 
 if __name__ == "__main__":
     unittest.main()

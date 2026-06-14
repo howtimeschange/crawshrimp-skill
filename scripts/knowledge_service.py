@@ -128,6 +128,36 @@ class KnowledgeService:
     def index_path(self) -> Path:
         return self.data_root / "index.json"
 
+    def _source_files(self) -> list[Path]:
+        paths: list[Path] = []
+        if self.adapters_root.exists():
+            for adapter_dir in sorted(self.adapters_root.iterdir()):
+                manifest_path = adapter_dir / "manifest.yaml"
+                if adapter_dir.is_dir() and manifest_path.exists():
+                    paths.append(manifest_path)
+                    notes_dir = adapter_dir / "notes"
+                    if notes_dir.exists():
+                        paths.extend(sorted(notes_dir.glob("*.md")))
+        if self.probes_root.exists():
+            for manifest_path in sorted(self.probes_root.glob("**/manifest.json")):
+                bundle_dir = manifest_path.parent
+                for name in ("manifest.json", "strategy.json", "recommendations.json", "endpoints.json"):
+                    path = bundle_dir / name
+                    if path.exists():
+                        paths.append(path)
+        return paths
+
+    def _source_fingerprint(self) -> str:
+        digest = hashlib.sha1()
+        for path in self._source_files():
+            try:
+                marker = f"{path.resolve()}\0{path.stat().st_size}\0".encode("utf-8")
+                digest.update(marker)
+                digest.update(path.read_bytes())
+            except Exception:
+                digest.update(str(path).encode("utf-8"))
+        return digest.hexdigest()
+
     def _task_candidates(self, adapter_dir: Path) -> list[tuple[str, str]]:
         manifest = _read_manifest(adapter_dir / "manifest.yaml")
         candidates = []
@@ -270,7 +300,18 @@ class KnowledgeService:
                 cards.extend(self._probe_cards(manifest_path.parent))
         self.data_root.mkdir(parents=True, exist_ok=True)
         self.cards_path.write_text(json.dumps(cards, ensure_ascii=False, indent=2), encoding="utf-8")
-        self.index_path.write_text(json.dumps({"card_count": len(cards), "updated_at": datetime.now(timezone.utc).isoformat()}, ensure_ascii=False, indent=2), encoding="utf-8")
+        self.index_path.write_text(
+            json.dumps(
+                {
+                    "card_count": len(cards),
+                    "source_fingerprint": self._source_fingerprint(),
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
         self._write_skill_docs(cards)
         return {"ok": True, "card_count": len(cards), "cards_path": str(self.cards_path)}
 
@@ -290,8 +331,15 @@ class KnowledgeService:
             path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
 
     def _load_cards(self) -> list[dict[str, Any]]:
-        if not self.cards_path.exists():
+        if not self.cards_path.exists() or not self.index_path.exists():
             self.rebuild()
+        else:
+            try:
+                index = json.loads(self.index_path.read_text(encoding="utf-8"))
+            except Exception:
+                index = {}
+            if not isinstance(index, dict) or index.get("source_fingerprint") != self._source_fingerprint():
+                self.rebuild()
         payload = json.loads(self.cards_path.read_text(encoding="utf-8"))
         return payload if isinstance(payload, list) else []
 

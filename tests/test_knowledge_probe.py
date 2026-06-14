@@ -89,6 +89,57 @@ class KnowledgeProbeTest(unittest.TestCase):
             self.assertTrue((out / "manifest.json").is_file())
             self.assertTrue((out / "report.md").read_text(encoding="utf-8").startswith("# Probe Report"))
 
+    def test_probe_bundle_always_redacts_raw_sensitive_capture_before_writing_network(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp) / "bundle"
+            raw_network = {
+                "matches": [
+                    {
+                        "url": "https://example.test/api/orders?token=abc&page=1",
+                        "headers": {"Cookie": "session=secret", "x-safe": "ok"},
+                        "postData": "{\"csrf\":\"secret\",\"page\":1}",
+                        "body": "{\"items\":[{\"id\":1}],\"token\":\"response-secret\"}",
+                        "mimeType": "application/json",
+                    }
+                ]
+            }
+
+            build_probe_bundle(
+                output_dir=out,
+                adapter_id="demo",
+                task_id="orders",
+                dom_snapshot={"url": "https://example.test/orders", "title": "Orders", "buttons": []},
+                passive_capture=raw_network,
+                interaction_captures=[],
+            )
+
+            network_text = (out / "network.json").read_text(encoding="utf-8")
+            self.assertNotIn("session=secret", network_text)
+            self.assertNotIn("response-secret", network_text)
+            self.assertNotIn("\"token\": \"abc\"", network_text)
+            self.assertIn("[REDACTED]", network_text)
+
+    def test_search_rebuilds_when_source_notes_change(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            adapters = root / "adapters"
+            notes = adapters / "demo" / "notes"
+            notes.mkdir(parents=True)
+            (adapters / "demo" / "manifest.yaml").write_text(
+                "id: demo\nname: Demo\nentry_url: https://example.test\ntasks:\n  - id: orders\n    name: Orders\n    script: orders.js\n",
+                encoding="utf-8",
+            )
+            note = notes / "orders-dom-findings-2026-06-14.md"
+            note.write_text("# Orders Findings\n\n## Endpoint\n- old endpoint\n", encoding="utf-8")
+            service = KnowledgeService(adapters_root=adapters, data_root=root / "knowledge", probes_root=root / "probes")
+            service.rebuild()
+
+            note.write_text("# Orders Findings\n\n## Endpoint\n- new fresh endpoint\n", encoding="utf-8")
+            search = service.search("fresh", adapter_id="demo", task_id="orders")
+
+            self.assertTrue(search["cards"])
+            self.assertIn("new fresh endpoint", search["cards"][0]["content"])
+
 
 if __name__ == "__main__":
     unittest.main()

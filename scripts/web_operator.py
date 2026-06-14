@@ -271,6 +271,7 @@ def journal_from_dict(payload: dict[str, Any]) -> Journal:
                     value=item.get("value"),
                     risk=str(item.get("risk") or "safe"),
                     reason=str(item.get("reason") or ""),
+                    metadata=dict(item.get("metadata") or {}),
                 )
             )
     for item in payload.get("verifications") or []:
@@ -347,7 +348,24 @@ class WebOperator:
         if kind == "navigate":
             target = url or value or selector
             value = target
-        protocol_action = Action(kind=kind, target=target, value=value, risk=risk, reason=reason)
+        metadata: dict[str, Any] = {}
+        if kind == "upload":
+            metadata = {"files": list(files or []), "timeout_ms": timeout_ms}
+        elif backend_kind == "upload_chooser":
+            metadata = {"clicks": list(clicks or []), "files": list(files or []), "timeout_ms": timeout_ms}
+        elif backend_kind == "capture_wheel":
+            parsed_matches = []
+            if value:
+                parsed = json.loads(value)
+                if not isinstance(parsed, list):
+                    raise ValueError("capture-wheel value must be a JSON array of matchers")
+                parsed_matches = parsed
+            metadata = {"wheels": list(wheels or []), "matchers": parsed_matches, "timeout_ms": timeout_ms}
+        elif kind == "download":
+            metadata = {"expected_file": expected_file, "timeout_ms": timeout_ms}
+        elif kind == "navigate":
+            metadata = {"url": str(value or url or selector), "timeout_ms": timeout_ms}
+        protocol_action = Action(kind=kind, target=target, value=value, risk=risk, reason=reason, metadata=metadata)
         validate_action(protocol_action, user_confirmed=user_confirmed)
 
         baseline: dict[str, dict[str, int]] = {}
@@ -360,12 +378,7 @@ class WebOperator:
                 BrowserAction(kind="upload_chooser", clicks=list(clicks or []), files=list(files or []), timeout_ms=timeout_ms, user_gesture=True)
             )
         elif backend_kind == "capture_wheel":
-            matches = []
-            if value:
-                parsed = json.loads(value)
-                if not isinstance(parsed, list):
-                    raise ValueError("capture-wheel value must be a JSON array of matchers")
-                matches = parsed
+            matches = list(metadata.get("matchers") or [])
             result = self.backend.execute(
                 BrowserAction(kind="capture", capture_mode="wheel", wheels=list(wheels or []), matches=matches, timeout_ms=timeout_ms)
             )

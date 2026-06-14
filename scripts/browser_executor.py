@@ -877,6 +877,33 @@ class ChromeCDPBackend:
             self.url_prefix = original_url_prefix
         return actions
 
+    async def handle_transient_download_tabs_async(self) -> list[dict[str, Any]]:
+        actions: list[dict[str, Any]] = []
+        current_tab_id = str(self.tab_id or "")
+        original_tab_id = self.tab_id
+        original_url_prefix = self.url_prefix
+        try:
+            for tab in self.list_tabs():
+                tab_id = str(tab.get("id") or "")
+                if not tab_id or tab_id == current_tab_id or not self._is_transient_download_tab(tab):
+                    continue
+                self.tab_id = tab_id
+                self.url_prefix = ""
+                try:
+                    result = await self.execute_async(BrowserAction(kind="eval", script=self._build_transient_confirm_script(), user_gesture=True))
+                except Exception:
+                    continue
+                value = result.data.get("value") if isinstance(result.data, dict) else {}
+                if result.ok and isinstance(value, dict):
+                    rows = value.get("data") if isinstance(value.get("data"), list) else []
+                    for row in rows:
+                        if isinstance(row, dict) and (row.get("handled") or row.get("modalPresent")):
+                            actions.append({**row, "tabId": tab_id})
+        finally:
+            self.tab_id = original_tab_id
+            self.url_prefix = original_url_prefix
+        return actions
+
     def observe(self) -> PageState:
         tab = self.select_tab()
         return PageState(

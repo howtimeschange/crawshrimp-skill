@@ -36,15 +36,26 @@ def _commands_from_journal(journal: dict[str, Any], *, name: str) -> dict[str, A
             continue
         kind = action.get("kind") or ""
         value = action.get("value")
+        metadata = action.get("metadata") if isinstance(action.get("metadata"), dict) else {}
         files = []
-        if kind == "upload" and isinstance(value, str):
+        if isinstance(metadata.get("files"), list):
+            files = [str(item) for item in metadata.get("files") or []]
+        elif kind in {"upload", "upload-chooser"} and isinstance(value, str):
             files = [item for item in value.split(",") if item]
+        matchers = metadata.get("matchers")
+        if not isinstance(matchers, list):
+            matchers = metadata.get("matches") if isinstance(metadata.get("matches"), list) else []
         actions.append({
             "kind": kind,
             "selector": action.get("target") or "",
             "value": action.get("value"),
             "url": value if kind == "navigate" else "",
             "files": files,
+            "clicks": list(metadata.get("clicks") or []),
+            "wheels": list(metadata.get("wheels") or []),
+            "matchers": list(matchers or []),
+            "expected_file": str(metadata.get("expected_file") or metadata.get("expectedFile") or ""),
+            "timeout_ms": int(metadata.get("timeout_ms") or metadata.get("timeoutMs") or 0),
             "risk": action.get("risk") or "safe",
             "reason": action.get("reason") or "",
         })
@@ -100,7 +111,17 @@ def main() -> int:
             step += ["--selector", action["selector"]]
         for file_path in action.get("files") or []:
             step += ["--file", file_path]
-        if action.get("value") is not None and action.get("kind") not in {"navigate", "upload"}:
+        if action.get("clicks"):
+            step += ["--clicks-json", json.dumps(action["clicks"], ensure_ascii=False)]
+        if action.get("wheels"):
+            step += ["--wheels-json", json.dumps(action["wheels"], ensure_ascii=False)]
+        if action.get("matchers") and action.get("kind") == "capture-wheel":
+            step += ["--value", json.dumps(action["matchers"], ensure_ascii=False)]
+        if action.get("expected_file"):
+            step += ["--expected-file", str(action["expected_file"])]
+        if action.get("timeout_ms"):
+            step += ["--timeout-ms", str(action["timeout_ms"])]
+        if action.get("value") is not None and action.get("kind") not in {"navigate", "upload"} and not (action.get("kind") == "capture-wheel" and action.get("matchers")):
             step += ["--value", str(action["value"])]
         if action.get("reason"):
             step += ["--reason", action["reason"]]

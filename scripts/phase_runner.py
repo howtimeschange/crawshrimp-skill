@@ -111,7 +111,11 @@ class WebPhaseRunner:
         )
 
     async def _execute(self, action: BrowserAction) -> BrowserResult:
-        result = self.backend.execute(action)
+        execute_async = getattr(self.backend, "execute_async", None)
+        if callable(execute_async):
+            result = execute_async(action)
+        else:
+            result = self.backend.execute(action)
         if hasattr(result, "__await__"):
             result = await result
         return result

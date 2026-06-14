@@ -218,19 +218,33 @@ def _auth_script_source(source: str) -> str:
     )
 
 
+def _is_logged_in(value: Any) -> bool:
+    if not isinstance(value, dict) or not value.get("success"):
+        return False
+    meta = value.get("meta") if isinstance(value.get("meta"), dict) else {}
+    if bool(meta.get("logged_in")):
+        return True
+    data = value.get("data")
+    if isinstance(data, list) and data:
+        first = data[0]
+        if isinstance(first, dict) and bool(first.get("logged_in")):
+            return True
+    return False
+
+
 def run_auth_check(registry: AdapterRegistry, adapter_id: str, *, backend: Any) -> dict[str, Any]:
     script_path = registry.resolve_auth_script(adapter_id)
     if not script_path:
         return {"ok": True, "adapter_id": adapter_id, "skipped": True, "reason": "no auth check script"}
     result = backend.execute(BrowserAction(kind="eval", script=_auth_script_source(script_path.read_text(encoding="utf-8"))))
     value = result.data.get("value") if isinstance(result.data, dict) else {}
-    ok = bool(result.ok and (not isinstance(value, dict) or value.get("success", True)))
+    ok = bool(result.ok and _is_logged_in(value))
     return {
         "ok": ok,
         "adapter_id": adapter_id,
         "script": str(script_path),
         "result": value,
-        "error": "" if ok else result.error or (value.get("error") if isinstance(value, dict) else "auth check failed"),
+        "error": "" if ok else result.error or (value.get("error") if isinstance(value, dict) else "") or "not logged in",
     }
 
 

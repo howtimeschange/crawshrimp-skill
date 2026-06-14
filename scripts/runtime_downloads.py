@@ -221,29 +221,33 @@ class DownloadManager:
         last_result: dict[str, Any] | None = None
         for attempt in range(1, max(retry_attempts, 1) + 1):
             item_timeout = int(item.get("timeout_seconds") or item.get("timeoutSeconds") or item.get("timeout") or timeout_seconds)
-            if browser_session:
-                if self._browser_session_downloader is None:
-                    result = {
-                        "success": False,
-                        "path": str(target),
-                        "error": "browser_session download requires a browser_session_downloader hook",
-                        "browserSession": True,
-                    }
+            try:
+                if browser_session:
+                    if self._browser_session_downloader is None:
+                        result = {
+                            "success": False,
+                            "path": str(target),
+                            "error": "browser_session download requires a browser_session_downloader hook",
+                            "browserSession": True,
+                        }
+                    else:
+                        result = self._browser_session_downloader(item, target, item_timeout)
+                        if hasattr(result, "__await__"):
+                            result = await result
+                        result = result if isinstance(result, dict) else {"success": False, "path": str(target), "error": "browser_session downloader returned invalid result"}
+                        result.setdefault("browserSession", True)
                 else:
-                    result = self._browser_session_downloader(item, target, item_timeout)
-                    if hasattr(result, "__await__"):
-                        result = await result
-                    result = result if isinstance(result, dict) else {"success": False, "path": str(target), "error": "browser_session downloader returned invalid result"}
-                    result.setdefault("browserSession", True)
-            else:
-                result = await self._fetch_url(
-                    url,
-                    target,
-                    headers,
-                    item_timeout,
-                    no_proxy,
-                    progress_callback,
-                )
+                    result = await self._fetch_url(
+                        url,
+                        target,
+                        headers,
+                        item_timeout,
+                        no_proxy,
+                        progress_callback,
+                    )
+                result = result if isinstance(result, dict) else {"success": False, "path": str(target), "error": "download returned invalid result"}
+            except Exception as exc:
+                result = {"success": False, "path": str(target), "error": str(exc)}
             result["label"] = label or Path(str(result.get("path") or target)).name
             result["filename"] = Path(str(result.get("path") or target)).name
             result["url"] = url
@@ -377,10 +381,26 @@ class DownloadManager:
         return {"success": True, "path": saved, "filename": target.name, "bytes": target.stat().st_size}
 
     async def _maybe_call_backend_hook(self, backend: Any, name: str, *args: Any) -> Any:
+        async_hook = getattr(backend, f"{name}_async", None)
+        if callable(async_hook):
+            result = async_hook(*args)
+            if hasattr(result, "__await__"):
+                return await result
+            return result
         hook = getattr(backend, name, None)
-        if hook is None:
+        if not callable(hook):
             return None
         result = hook(*args)
+        if hasattr(result, "__await__"):
+            return await result
+        return result
+
+    async def _execute_backend(self, backend: Any, action: Any) -> Any:
+        execute_async = getattr(backend, "execute_async", None)
+        if callable(execute_async):
+            result = execute_async(action)
+        else:
+            result = backend.execute(action)
         if hasattr(result, "__await__"):
             return await result
         return result
@@ -439,9 +459,7 @@ class DownloadManager:
             seen_transient: set[str] = set()
 
             for click in clicks:
-                result = backend.execute(BrowserAction(kind="click", x=float(click["x"]), y=float(click["y"])))
-                if hasattr(result, "__await__"):
-                    result = await result
+                result = await self._execute_backend(backend, BrowserAction(kind="click", x=float(click["x"]), y=float(click["y"])))
                 if not getattr(result, "ok", False):
                     failure = {
                         "success": False,

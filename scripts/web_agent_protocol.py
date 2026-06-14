@@ -60,6 +60,7 @@ class Action:
     value: str | None = None
     risk: str = "safe"
     reason: str = ""
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

@@ -30,6 +30,15 @@ This is a web-operation protocol and CDP automation skill for AI agents. Instead
 - 安全边界：默认阻止 `submit`、`publish`、`send`、`delete`、`pay`、`purchase`、`confirm`、`bulk_modify` 等危险动作，除非用户明确确认。
 - 测试与校验：包含 `unittest` 测试和 `quick_validate.py` 仓库结构检查。
 
+### 运行层硬化
+
+- Phase runner 和点击下载优先调用后端 `execute_async()` / async hooks，真实 `ChromeCDPBackend` 不会在已运行事件循环里再次触发 `asyncio.run()`。
+- Adapter auth check 按抓虾语义要求 `meta.logged_in` 或首条 `data.logged_in` 为真；`success: true` 但 `logged_in: false` 会被视为未登录。
+- Probe bundle 在写入 `network.json` 前会强制脱敏 URL、cookie/auth headers、postData 和 response body 中的敏感字段。
+- `download_urls()` 会把 malformed data URL、自定义 fetcher 异常或 browser-session hook 异常记录为单个 item 失败，避免中断整批下载。
+- Journal/workflow replay 会保留并复放 file chooser clicks、wheel capture wheels/matchers、上传文件列表、expected-file 和 timeout 参数。
+- Knowledge search 会用 notes/probe 源文件 fingerprint 自动重建索引，避免源内容变化后继续命中过期 cards。
+
 ### 适合的任务
 
 - 读取型：抓表格、搜索信息、导出页面数据、总结页面内容。
@@ -197,6 +206,15 @@ It has two goals:
 - `distill`: turns a journal into workflow notes or a reusable package with `workflow.md`, `commands.json`, `run_workflow.py`, and optionally a generated `SKILL.md`.
 - Safety guardrails: dangerous actions such as submit, publish, send, delete, pay, purchase, confirm, and bulk modify require explicit confirmation.
 - Validation: includes `unittest` coverage and a `quick_validate.py` skill-structure validator.
+
+### Runtime Hardening
+
+- The phase runner and click-download flow prefer backend `execute_async()` / async hooks, so the real `ChromeCDPBackend` does not call `asyncio.run()` from an already-running event loop.
+- Adapter auth checks follow crawshrimp login semantics: `meta.logged_in` or the first `data.logged_in` row must be true; `success: true` with `logged_in: false` is treated as unauthenticated.
+- Probe bundles redact sensitive URL params, cookie/auth headers, postData, and response-body fields before writing `network.json`.
+- `download_urls()` records malformed data URLs, custom fetcher exceptions, and browser-session hook exceptions as per-item failures instead of aborting the whole batch.
+- Journal/workflow replay preserves file chooser clicks, wheel capture wheels/matchers, uploaded files, expected-file values, and timeout arguments.
+- Knowledge search fingerprints notes/probe sources and rebuilds stale indexes automatically when source files change.
 
 ### Supported Task Families
 

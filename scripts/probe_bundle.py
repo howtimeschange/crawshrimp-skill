@@ -431,8 +431,8 @@ def build_probe_bundle(
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
     framework = framework_snapshot or {}
-    passive = passive_capture or {"matches": []}
-    interactions = interaction_captures or []
+    passive = redact_capture_payload(passive_capture or {"matches": []})
+    interactions = redact_capture_payload(interaction_captures or [])
     captured = _flatten_network(passive, interactions)
     endpoints = analyze_endpoints(captured, framework)
     page_map = build_page_map(dom_snapshot, interactions)
