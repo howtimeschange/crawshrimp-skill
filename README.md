@@ -8,6 +8,8 @@
 
 - 观察页面：读取 URL、标题、可见文本、按钮、输入框、表格、弹窗、抽屉、危险操作线索、资源请求和框架/store 线索。
 - 安全操作：执行点击、输入、选择、等待、导航、上传、文件选择器上传、下载等动作，每一步都能记录原因和证据。
+- 操作已登录后台：优先连接用户已经打开的 `http://127.0.0.1:9222` CDP 浏览器，复用真实登录态和企业后台会话。
+- 处理企业表单：在编辑配额、百分比、角色分配、审批配置等业务表单前，先读取业务规则、可用额度、校验状态和保存语义。
 - 捕获网络：支持 passive、click、url、wheel 请求捕获，支持 matcher、`min_matches`、`settle_ms`、响应体捕获和 endpoint 分析。
 - 运行抓虾式多阶段脚本：兼容 phase/shared 模式，支持 `cdp_clicks`、`capture_*`、`download_urls`、`download_clicks`、`next_phase`、`complete` 等 runtime action。
 - 管理 adapter 和知识：扫描/安装 adapter manifest，持久化 enable 状态和安装元数据；从 notes/probe bundle 生成可搜索 knowledge cards。
@@ -31,6 +33,9 @@
 - Upload：file input 和 file chooser 上传都会在触发 CDP 前校验本地文件存在。
 - Workflow replay：保留并复放 clicks、wheels、matchers、files、expected-file、timeout。
 - Adapter draft：`distill --include-adapter-draft` 生成可审查的 `manifest.yaml`、JS 草稿和说明。
+- Enterprise form workflow：新增企业后台表单操作参考，要求优先使用 9222 登录态、读取业务规则、规划百分比/配额更新顺序，并通过刷新后的 UI 与应用/API readback 做双重验证。
+- Browser execution：补充 9222 默认入口、页面自有 API/模块包装器使用边界，以及“不导出 cookie/token/auth header”的凭证安全规则。
+- Quick validation：新增结构校验和单元测试，确保企业表单参考文档与 `SKILL.md` 关键术语不会被后续改动漏掉。
 
 仍然不包含完整抓虾桌面应用里的 GUI、任务队列、账号管理、平台内置 adapter 集合、数据导出 UI 或桌面发布流程。这些属于宿主应用层，不在本 skill 的边界内。
 
@@ -48,7 +53,7 @@ python3 -m pip install -r requirements.txt
   --user-data-dir=/tmp/crawshrimp-skill-chrome
 ```
 
-打开目标网页并完成登录后，后续命令默认连接 `http://127.0.0.1:9222`。
+打开目标网页并完成登录后，后续命令默认连接 `http://127.0.0.1:9222`。如果用户已经准备好了带登录态的 Chrome/CDP 会话，优先复用该会话；看到登录页时，先检查 9222 里是否已有同域名的已登录 tab，不要直接切到全新浏览器或要求用户重新登录。
 
 ### 1. 先判断任务类型
 
@@ -68,17 +73,21 @@ python3 scripts/web_agent_protocol.py journal-template "多页面收集详情证
 
 ```bash
 python3 scripts/web_operator.py observe \
+  --cdp-url http://127.0.0.1:9222 \
   --url-prefix https://example.com \
   --task "下载订单报表" \
   --journal run.json
 
 python3 scripts/web_operator.py snapshot \
+  --cdp-url http://127.0.0.1:9222 \
   --url-prefix https://example.com \
   --task "下载订单报表" \
   --journal run.json
 ```
 
 `observe` 给出规范化页面模型；`snapshot` 更适合 probe 前判断 framework、store 和 network 线索。
+
+企业或内部后台任务要先确认账号、工作区、目标记录、生产/测试环境、当前值和业务规则。涉及配额、百分比总和、可用量、审批状态、发布状态的页面，不要先改字段；先把规则和保存语义写进 journal。
 
 ### 3. 小步执行动作
 
@@ -121,6 +130,8 @@ python3 scripts/web_operator.py act download \
 
 原则：每次只做一个动作；页面跳转、弹窗出现、表格刷新、文件下载后都要重新观察或验证。
 
+复杂 React/Vue/Next 后台如果 DOM 编辑不稳定，可以在页面上下文内使用前端已经加载的应用 API、模块函数或请求 wrapper。这样做的前提是：用户已经明确授权对应外部效果，请求属于当前页面应用，payload 结构来自页面代码、禁用态规则或已观察到的网络行为，并且 cookie、token、auth header、localStorage、sessionStorage 等凭证始终留在页面上下文内，不打印、不落盘、不写进 journal。
+
 ### 4. 验证结果
 
 ```bash
@@ -140,6 +151,8 @@ python3 scripts/web_operator.py verify \
 ```
 
 支持的结构化验证：`text`、`url`、`selector-exists`、`table-rows-min`、`file-exists`。也可以用 `--expression` 写 JS 断言。
+
+企业表单保存后使用双重验证：刷新或重新观察可见 UI，确认目标值已经显示；再用应用/API readback、页面状态或稳定网络结果确认服务端已持久化。百分比或配额类表单要在 journal 里记录旧值、新值、目标总和和更新顺序，例如先降低超额项，再提高其他项，避免中间状态触发总量上限。
 
 ### 5. 捕获网络和生成 probe bundle
 
@@ -260,6 +273,8 @@ python3 scripts/workflow_builder.py \
 
 填写表单不等于允许提交表单。提交、发布、删除、付款等动作必须单独确认。
 
+企业后台的保存/提交也按危险动作处理，除非用户已经在当前对话里明确授权了具体变更。使用页面自有 API 或 in-page `fetch` 保存时，只记录脱敏后的 endpoint、payload 形状、响应状态和业务字段；不要读取、复制、复用或持久化任何凭证。
+
 ## 项目结构
 
 ```text
@@ -269,6 +284,7 @@ crawshrimp-skill/
   README.md
   agents/openai.yaml
   references/
+    enterprise-form-workflows.md
   scripts/
     web_agent_protocol.py
     adapter_registry.py
@@ -280,6 +296,7 @@ crawshrimp-skill/
     web_operator.py
     workflow_builder.py
   tests/
+    test_quick_validate.py
   quick_validate.py
 ```
 

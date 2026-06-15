@@ -1,6 +1,6 @@
 ---
 name: crawshrimp-skill
-description: Use when an AI agent needs to explore a live webpage, understand page state, plan safe browser actions, extract data, download files, fill forms without dangerous submission, or complete multi-step web workflows with evidence.
+description: Use when an AI agent needs to explore a live webpage, operate authenticated enterprise/internal pages through CDP 9222, understand page state, plan safe browser actions, extract data, download files, fill forms without dangerous submission, or complete multi-step web workflows with evidence.
 ---
 
 # Crawshrimp Skill
@@ -11,15 +11,33 @@ Crawshrimp Skill has two jobs: use crawshrimp-style CDP browser automation to le
 
 The loop is: observe, model, plan, act, verify, journal, then distill.
 
+## Operation Surface Ladder
+
+Do not blindly start from APIs. First observe the prepared browser and page state, then choose the fastest reliable surface:
+
+1. Visible UI/DOM for simple controls and human-readable readback.
+2. Page-owned application APIs, frontend modules, or observed request wrappers for complex React/Vue/Next flows when they reduce editor, selector, or coordinate brittleness.
+3. Low-level CDP primitives only when the UI and app layer are insufficient.
+
+For create/update/publish flows, the page-owned API is usually faster and more stable after the payload shape, auth context, required fields, and disabled-state rules are understood. Verify persisted state through UI refresh plus application/API readback when possible.
+
+## Default Browser Entry
+
+For authenticated, enterprise, or internal pages, start with the user's existing CDP browser on `http://127.0.0.1:9222`. Use `--cdp-url http://127.0.0.1:9222` and observe the requested URL prefix before opening a new browser, using a browser extension, or asking the user to log in again.
+
+If the page looks logged out, first check whether the 9222 browser already has a logged-in tab or session for the same host. Treat a login screen in a fresh browser as an environment mismatch until the 9222 session is ruled out.
+
 ## Operating Loop
 
 1. Classify the task as `read`, `operate`, or `flow`.
 2. Observe the current page before acting: URL, title, visible text, controls, tables, downloads, network clues, and blocking states.
-3. Build a page model that names the user's goal, the relevant objects, safe actions, risks, and success evidence.
-4. Plan small steps with stop conditions. Every planned action needs a readback or verification signal.
-5. Execute one safe action at a time. Re-observe after page transitions, dialogs, downloads, navigation, or re-render.
-6. Verify against evidence, not hope: visible UI state, extracted rows, downloaded files, changed URL, success messages, or stable network results.
-7. Journal the work. Record observations, plans, actions, verification evidence, failures, and the final reusable workflow notes.
+3. Read business rules before editing: quotas, used/remaining capacity, percentage totals, field validation, permission state, and save semantics.
+4. Build a page model that names the user's goal, the relevant objects, safe actions, risks, and success evidence.
+5. Choose the least brittle operation surface. Use DOM controls when they are clear; for complex Next/React/Vue enterprise apps, prefer page-owned frontend API/module wrappers already loaded by the page when they are safer than coordinate, editor-state, or fragile selector work.
+6. Plan small steps with stop conditions. Every planned action needs a readback or verification signal, and ratio/percentage updates must avoid invalid intermediate totals.
+7. Execute one safe action at a time. Re-observe after page transitions, dialogs, downloads, navigation, or re-render.
+8. Verify against evidence, not hope: visible UI state, extracted rows, downloaded files, changed URL, success messages, stable network results, or application readback. Use double verification for enterprise form changes: refreshed visible UI plus API/application-state readback when available.
+9. Journal the work. Record observations, plans, actions, verification evidence, failures, and the final reusable workflow notes.
 
 Use `scripts/web_agent_protocol.py` for the shared task taxonomy, safety checks, plan template, and evidence journal schema:
 
@@ -93,6 +111,8 @@ Default to safe, reversible, or read-only actions. Stop and ask the user before 
 
 Do not treat a filled form as permission to submit it. Filling fields can be safe; sending the form is a separate dangerous action.
 
+For enterprise forms, final save or submit is dangerous unless the user explicitly authorizes that exact change. If authorization is already explicit in the conversation, proceed with a journaled action and immediate readback.
+
 ## Reference Map
 
 - Read `references/protocol.md` for the protocol objects, task families, action risks, and evidence journal.
@@ -101,6 +121,7 @@ Do not treat a filled form as permission to submit it. Filling fields can be saf
 - Read `references/action-primitives.md` before clicking, typing, selecting, downloading, uploading, waiting, or navigating.
 - Read `references/network-intelligence.md` when deciding whether to inspect requests or stay DOM-first.
 - Read `references/browser-execution.md` before using direct Chrome/CDP, `observe / act / verify / journal / distill`, or low-level request capture.
+- Read `references/enterprise-form-workflows.md` before editing authenticated internal forms, quotas, percentages, allocations, approval flows, or other enterprise workflow settings.
 - Read `references/verification.md` for structured completion checks.
 - Read `references/safety.md` before any caution or dangerous action.
 - Read `references/workflow-distillation.md` after a workflow succeeds and should become a reusable skill, script, CLI command, or adapter draft.
@@ -111,8 +132,14 @@ Do not treat a filled form as permission to submit it. Filling fields can be saf
 ## Common Mistakes
 
 - Acting before observing the page.
+- Opening a fresh browser or extension first for a logged-in internal page instead of checking `http://127.0.0.1:9222`.
+- Asking the user to log in again after seeing a login page without checking the 9222 CDP browser session.
+- Editing enterprise form values before reading business rules, quotas, used capacity, or total-percentage constraints.
+- Raising percentage items before lowering the oversized item when the form enforces a total cap.
+- Brute-forcing a brittle DOM/coordinate path when the page already exposes a safe frontend API wrapper.
 - Running one large script without readback checkpoints.
 - Treating a clicked button as success without checking resulting state.
 - Submitting, publishing, deleting, sending, paying, or bulk modifying without explicit user confirmation.
+- Claiming an enterprise form change from only one signal; use double verification with refreshed UI and application/API readback when available.
 - Forgetting to record evidence, which makes the workflow impossible to debug or reuse.
 - Stopping at `workflow.md` when the workflow will be repeated; generate a reusable package with `distill --output-dir`.

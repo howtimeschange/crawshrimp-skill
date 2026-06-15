@@ -10,6 +10,16 @@ Use `scripts/web_operator.py` for agent-facing work. It exposes the five protoco
 - `journal`: create or write an evidence journal
 - `distill`: turn the journal into workflow or adapter draft notes
 
+For authenticated enterprise/internal pages, default to the user's already-open Chrome CDP endpoint:
+
+```bash
+python3 scripts/web_operator.py observe --cdp-url http://127.0.0.1:9222 --url-prefix https://ai.semir.com --task "inspect logged-in page" --journal run.json
+python3 scripts/browser_executor.py cdp --cdp-url http://127.0.0.1:9222 --url-prefix https://ai.semir.com observe
+python3 scripts/browser_executor.py cdp --cdp-url http://127.0.0.1:9222 --url-prefix https://ai.semir.com eval --script "document.title"
+```
+
+If this lands on a login page, check the 9222 tab list and target host before asking the user to authenticate. A fresh browser, in-app browser, or extension path often lacks the cookies and enterprise session that the user already prepared.
+
 ## High-Level Operator
 
 Start Chrome with remote debugging, then use:
@@ -57,15 +67,20 @@ Low-level CDP actions map to:
 
 Direct CDP observe currently returns tab-level metadata. Use `eval` with page-model snippets when you need deeper DOM or accessibility structure.
 
+The higher-level `web_operator.py observe` runs a DOM snapshot and is usually better for page modeling. Use low-level direct CDP observe when choosing a tab or debugging the endpoint itself.
+
 ## Safety Rules
 
 - Browser execution is not permission to perform dangerous actions.
 - Coordinate clicks are less self-explanatory than selector or role clicks; journal why the coordinate is safe.
 - For submit, publish, send, delete, pay, purchase, confirm, or bulk modify, stop and request explicit user confirmation before calling the backend.
+- For enterprise form save/submit, require explicit authorization naming the change unless the user's instruction already gives that authorization.
+- Do not read cookies, localStorage, sessionStorage, auth headers, tokens, or secrets just because CDP makes them accessible.
+- When an explicitly authorized task uses the page's own API or in-page `fetch`, keep session credentials inside page context and never print, persist, journal, or reuse them outside the current browser session. Log sanitized endpoint, payload shape, and response status instead.
 - After each backend action, re-observe or run a verification eval before continuing.
 
 ## Failure Handling
 
 - If CDP reports multiple matching tabs, ask for `--tab-id`.
-- If CDP cannot connect, ask the user to start Chrome with remote debugging.
+- If CDP cannot connect to `http://127.0.0.1:9222`, ask the user to start or expose the prepared Chrome session with remote debugging before falling back to a non-authenticated browser.
 - If a page re-renders after an action, discard stale control assumptions and observe again.

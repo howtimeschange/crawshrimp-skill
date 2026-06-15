@@ -27,6 +27,7 @@ REQUIRED_FILES = [
     "references/action-primitives.md",
     "references/network-intelligence.md",
     "references/browser-execution.md",
+    "references/enterprise-form-workflows.md",
     "references/verification.md",
     "references/safety.md",
     "references/workflow-distillation.md",
@@ -40,6 +41,10 @@ REQUIRED_SKILL_TERMS = [
     "journal",
     "distill",
     "dangerous",
+    "9222",
+    "enterprise",
+    "business rules",
+    "double verification",
 ]
 
 
