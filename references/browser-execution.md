@@ -10,28 +10,35 @@ Use `scripts/web_operator.py` for agent-facing work. It exposes the five protoco
 - `journal`: create or write an evidence journal
 - `distill`: turn the journal into workflow or adapter draft notes
 
-For authenticated enterprise/internal pages, default to the user's already-open Chrome CDP endpoint:
+For every webpage task, default to the user's already-open Chrome CDP endpoint:
 
 ```bash
-python3 scripts/web_operator.py observe --cdp-url http://127.0.0.1:9222 --url-prefix https://ai.semir.com --task "inspect logged-in page" --journal run.json
-python3 scripts/browser_executor.py cdp --cdp-url http://127.0.0.1:9222 --url-prefix https://ai.semir.com observe
-python3 scripts/browser_executor.py cdp --cdp-url http://127.0.0.1:9222 --url-prefix https://ai.semir.com eval --script "document.title"
+python3 scripts/web_operator.py observe --cdp-url http://127.0.0.1:9222 --url-prefix https://example.com --task "inspect current page" --journal run.json
+python3 scripts/browser_executor.py cdp --cdp-url http://127.0.0.1:9222 --url-prefix https://example.com observe
+python3 scripts/browser_executor.py cdp --cdp-url http://127.0.0.1:9222 --url-prefix https://example.com eval --script "document.title"
 ```
 
-If this lands on a login page, check the 9222 tab list and target host before asking the user to authenticate. A fresh browser, in-app browser, or extension path often lacks the cookies and enterprise session that the user already prepared.
+If this lands on a login page or unexpected host, check the 9222 tab list and target host before asking the user to authenticate. A fresh browser, in-app browser, or extension path often lacks the cookies, runtime state, and active page context that the user already prepared.
+
+## API-First Operation
+
+After observation, prefer the page's own API or request path over manual clicking:
+
+- frontend modules, stores, route actions, or request wrappers already loaded by the page
+- observed API endpoints and payload shapes from capture output
+- in-page `fetch` that runs inside the current page context
+- direct file/export/download URLs that can be verified without brittle UI steps
+
+DOM clicks and coordinate actions are fallback surfaces. Use them when the API path is unavailable, unsafe, unverifiable, or when a visible interaction is the user's actual target. UI is still valuable for readback and verification after an API-first action.
 
 ## High-Level Operator
 
-Start Chrome with remote debugging, then use:
+Start from the 9222 browser, then use:
 
 ```bash
-python3 scripts/web_operator.py observe --url-prefix https://example.com --task "read report" --journal run.json
-python3 scripts/web_operator.py act click --url-prefix https://example.com --selector "button.export" --reason "open export menu" --journal run.json
-python3 scripts/web_operator.py act type --url-prefix https://example.com --selector "input.search" --value "sku123" --reason "filter by SKU" --journal run.json
-python3 scripts/web_operator.py act paginate --url-prefix https://example.com --selector "button.next" --reason "go to next page" --journal run.json
-python3 scripts/web_operator.py act navigate --url-prefix https://example.com --url https://example.com/report --reason "open report page" --journal run.json
-python3 scripts/web_operator.py act upload --url-prefix https://example.com --selector "input[type=file]" --file ./input.csv --reason "attach input file" --journal run.json
-python3 scripts/web_operator.py act download --url-prefix https://example.com --selector "a.export" --expected-file report.csv --download-dir ~/Downloads --reason "download report" --journal run.json
+python3 scripts/web_operator.py observe --cdp-url http://127.0.0.1:9222 --url-prefix https://example.com --task "read report" --journal run.json
+python3 scripts/browser_executor.py cdp --cdp-url http://127.0.0.1:9222 --url-prefix https://example.com capture --capture-mode passive --matches-json '[{"url_contains":"/api/"}]' --include-response-body
+python3 scripts/browser_executor.py cdp --cdp-url http://127.0.0.1:9222 --url-prefix https://example.com eval --script "document.title"
 python3 scripts/web_operator.py verify --url-prefix https://example.com --expression "document.body.innerText.includes('sku123')" --evidence "SKU filter is visible" --journal run.json
 python3 scripts/web_operator.py verify --check table-rows-min --target table --minimum 1 --evidence "table has rows" --journal run.json
 python3 scripts/web_operator.py verify --check file-exists --target report.csv --download-dir ~/Downloads --evidence "report file exists" --journal run.json
@@ -39,7 +46,15 @@ python3 scripts/web_operator.py distill --journal run.json --output workflow.md
 python3 scripts/web_operator.py distill --journal run.json --output-dir reusable-workflow --name sku-report --include-skill
 ```
 
-The operator uses `Runtime.evaluate` for DOM snapshots, DOM actions, and verification checks. It intentionally runs one small action at a time so the agent can re-observe or verify before continuing.
+If the API path cannot solve the task safely, use fallback UI actions one at a time:
+
+```bash
+python3 scripts/web_operator.py act click --url-prefix https://example.com --selector "button.export" --reason "fallback: open export menu after API path was unavailable" --journal run.json
+python3 scripts/web_operator.py act type --url-prefix https://example.com --selector "input.search" --value "sku123" --reason "fallback: visible search is the available control" --journal run.json
+python3 scripts/web_operator.py act download --url-prefix https://example.com --selector "a.export" --expected-file report.csv --download-dir ~/Downloads --reason "fallback: download URL was not exposed" --journal run.json
+```
+
+The operator uses `Runtime.evaluate` for DOM snapshots, page-context API calls, DOM actions, and verification checks. It intentionally runs one small action at a time so the agent can re-observe or verify before continuing.
 
 When `--journal` points to an existing file, `observe`, `act`, and `verify` load it and append the next evidence item instead of replacing the route.
 
@@ -72,6 +87,7 @@ The higher-level `web_operator.py observe` runs a DOM snapshot and is usually be
 ## Safety Rules
 
 - Browser execution is not permission to perform dangerous actions.
+- Prefer the page-owned API/request path before manual page clicking, while keeping credentials inside page context.
 - Coordinate clicks are less self-explanatory than selector or role clicks; journal why the coordinate is safe.
 - For submit, publish, send, delete, pay, purchase, confirm, or bulk modify, stop and request explicit user confirmation before calling the backend.
 - For enterprise form save/submit, require explicit authorization naming the change unless the user's instruction already gives that authorization.

@@ -4,14 +4,14 @@ Use this for logged-in enterprise/internal admin pages, product or AI-workflow s
 
 ## Procedure
 
-1. Connect to the user's prepared CDP browser first: `--cdp-url http://127.0.0.1:9222`.
+1. Connect to the user's prepared CDP browser first: `--cdp-url http://127.0.0.1:9222`. This is the default for all tasks, not an enterprise-only exception.
 2. Observe the target host and tab. If a login page appears, check the 9222 session and matching tabs before asking the user to log in again.
 3. Identify visible account, workspace, environment, record name, and whether the page is production-like.
 4. Read business rules before editing: quota, "used", "remaining", "available", percentage total, validation text, disabled state, and save/submit semantics.
 5. Map the fields and current values to the user's requested target values.
 6. Choose the operation surface:
-   - Use visible DOM controls when fields, labels, and readbacks are reliable.
-   - Use page-owned frontend API/module wrappers or observed request shapes already loaded by the app when complex Next/React/Vue state makes DOM editing brittle.
+   - Prefer page-owned frontend API/module wrappers, actions, or observed request shapes already loaded by the app.
+   - Use visible DOM controls only when the API path is unavailable, unsafe, unverifiable, or the visible interaction is itself required.
    - Keep credentials inside the existing page/session context; never print, persist, journal, or copy cookies, tokens, auth headers, localStorage, sessionStorage, or secrets.
 7. Plan update ordering to avoid invalid intermediate states. For a capped total such as 100%, lower the oversized item before raising the others.
 8. Fill or update fields one cluster at a time, with readback after each cluster.
@@ -22,7 +22,7 @@ Use this for logged-in enterprise/internal admin pages, product or AI-workflow s
 
 ## API Wrapper Rule
 
-Prefer the app's own in-page modules, actions, or API wrapper functions only when they are already exposed by the running frontend and reduce brittleness. Treat them as the same application surface a user action would trigger.
+Prefer the app's own in-page modules, actions, API wrapper functions, or observed request paths when they are exposed by the running frontend and can be verified safely. Treat them as the same application surface a user action would trigger.
 
 For authorized saves or publishes, an in-page `fetch` or application wrapper may use the current browser session/token only inside page context. This is acceptable when the user explicitly authorized the external effect, the endpoint belongs to the app being operated, and the payload shape came from the page's code, disabled rules, or observed network behavior. It is not acceptable to export credentials, replay them from a separate script, or turn them into reusable secrets.
 

@@ -6,16 +6,17 @@ Start from the user's requested outcome, not from a script shape.
 
 Plan each webpage task as:
 
-1. current page evidence
-2. next safe question to answer
-3. one action or read
-4. expected readback
-5. fallback if the readback fails
+1. current page evidence from the user's `http://127.0.0.1:9222` browser
+2. page-owned API/request path to inspect or use first
+3. next safe question to answer
+4. one API-first action or read
+5. expected API/application and UI readback
+6. fallback DOM action only if the API path is unavailable, unsafe, or unverifiable
 
 ## Task Families
 
-- `read`: collect visible data or page-owned API evidence without changing state.
-- `operate`: change local page state such as filters, tabs, pagination, form fields, or downloads.
+- `read`: collect page-owned API evidence and visible data without changing state.
+- `operate`: use page-owned APIs first, or fallback UI controls, to change local page state such as filters, tabs, pagination, form fields, or downloads.
 - `flow`: move through multiple pages, drawers, dialogs, or repeated detail states.
 
 ## Replanning

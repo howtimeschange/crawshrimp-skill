@@ -9,22 +9,23 @@ Capture enough state for another agent to understand the page without seeing it:
 - Forms, inputs, selects, checkboxes, radios, buttons, tabs, menus, and dialogs.
 - Tables, lists, cards, result counts, pagination, and empty/busy/error states.
 - Downloads, upload controls, and generated artifacts.
-- Network clues only when DOM evidence is insufficient or the page's own API is more reliable.
+- Network clues, frontend modules, stores, action wrappers, and page-owned API paths.
 
 ## Unknown Page Routine
 
-1. Read the visible page before clicking.
+1. Connect to the user's `http://127.0.0.1:9222` browser and read the current page before acting.
 2. Identify the user's target object: table, product, order, file, dialog, report, or form.
-3. Identify safe controls and dangerous controls separately.
-4. Find success signals before acting.
-5. Find failure and blocking signals before acting.
-6. Act only after the page model explains why the action is safe and useful.
+3. Identify the page-owned API/request path that reads or mutates the target object.
+4. Identify safe controls and dangerous controls separately.
+5. Find success signals before acting.
+6. Find failure and blocking signals before acting.
+7. Act only after the page model explains why the API path or fallback UI action is safe and useful.
 
 ## Dynamic Page Rules
 
 - Re-observe after navigation, re-render, popover open/close, filter changes, pagination, downloads, or errors.
 - Scope observations to the active dialog, drawer, tab, frame, or page region.
-- Prefer stable labels and roles over brittle CSS selectors when a browser tool provides them.
+- Prefer page-owned API paths over DOM actions; if falling back to DOM, prefer stable labels and roles over brittle CSS selectors.
 - Treat stale rows, false loading states, and empty states as evidence problems, not immediate conclusions.
 
 ## Useful Evidence

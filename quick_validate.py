@@ -42,8 +42,9 @@ REQUIRED_SKILL_TERMS = [
     "distill",
     "dangerous",
     "9222",
-    "enterprise",
-    "business rules",
+    "API-first",
+    "page-owned API",
+    "request path",
     "double verification",
 ]
 

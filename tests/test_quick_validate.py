@@ -20,7 +20,7 @@ name: crawshrimp-skill
 description: Use when an AI agent needs to operate live webpages.
 ---
 
-observe act verify journal distill dangerous 9222 enterprise business rules double verification
+observe act verify journal distill dangerous 9222 API-first page-owned API request path double verification
 """
 
 
@@ -39,7 +39,7 @@ class QuickValidateTest(unittest.TestCase):
             errors,
         )
 
-    def test_requires_authenticated_enterprise_workflow_terms(self):
+    def test_requires_global_9222_and_api_first_terms(self):
         skill_text = """---
 name: crawshrimp-skill
 description: Use when an AI agent needs to operate live webpages.
@@ -53,8 +53,9 @@ observe act verify journal distill dangerous
             errors = quick_validate.validate(root)
 
         self.assertIn("SKILL.md missing term: 9222", errors)
-        self.assertIn("SKILL.md missing term: enterprise", errors)
-        self.assertIn("SKILL.md missing term: business rules", errors)
+        self.assertIn("SKILL.md missing term: API-first", errors)
+        self.assertIn("SKILL.md missing term: page-owned API", errors)
+        self.assertIn("SKILL.md missing term: request path", errors)
         self.assertIn("SKILL.md missing term: double verification", errors)
 
 

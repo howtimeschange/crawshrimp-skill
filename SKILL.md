@@ -1,6 +1,6 @@
 ---
 name: crawshrimp-skill
-description: Use when an AI agent needs to explore a live webpage, operate authenticated enterprise/internal pages through CDP 9222, understand page state, plan safe browser actions, extract data, download files, fill forms without dangerous submission, or complete multi-step web workflows with evidence.
+description: Use when an AI agent needs to explore and operate a live webpage through the user's existing CDP 9222 browser session, prefer page-owned APIs/request paths over manual clicking, extract data, download files, fill forms without dangerous submission, or complete multi-step web workflows with evidence.
 ---
 
 # Crawshrimp Skill
@@ -11,33 +11,35 @@ Crawshrimp Skill has two jobs: use crawshrimp-style CDP browser automation to le
 
 The loop is: observe, model, plan, act, verify, journal, then distill.
 
-## Operation Surface Ladder
-
-Do not blindly start from APIs. First observe the prepared browser and page state, then choose the fastest reliable surface:
-
-1. Visible UI/DOM for simple controls and human-readable readback.
-2. Page-owned application APIs, frontend modules, or observed request wrappers for complex React/Vue/Next flows when they reduce editor, selector, or coordinate brittleness.
-3. Low-level CDP primitives only when the UI and app layer are insufficient.
-
-For create/update/publish flows, the page-owned API is usually faster and more stable after the payload shape, auth context, required fields, and disabled-state rules are understood. Verify persisted state through UI refresh plus application/API readback when possible.
-
 ## Default Browser Entry
 
-For authenticated, enterprise, or internal pages, start with the user's existing CDP browser on `http://127.0.0.1:9222`. Use `--cdp-url http://127.0.0.1:9222` and observe the requested URL prefix before opening a new browser, using a browser extension, or asking the user to log in again.
+For every webpage task, start with the user's existing CDP browser on `http://127.0.0.1:9222`. Use `--cdp-url http://127.0.0.1:9222` and observe the requested URL prefix before opening a new browser, using a browser extension, or asking the user to log in again.
 
 If the page looks logged out, first check whether the 9222 browser already has a logged-in tab or session for the same host. Treat a login screen in a fresh browser as an environment mismatch until the 9222 session is ruled out.
+
+## Operation Surface Ladder
+
+Do not default to manual page clicking. Use an API-first approach: first observe the prepared 9222 browser and page state, then identify the page-owned API or request path that can complete the task with the least brittle operation surface:
+
+1. Page-owned application APIs, frontend modules, actions, or observed request wrappers already loaded by the page.
+2. In-page `fetch` or low-level request replay inside the current page context, after payload shape, auth context, business rules, and safety checks are understood.
+3. Visible UI/DOM controls only when no reliable page-owned API path exists, when a human-visible interaction is the source of truth, or when UI readback is needed for verification.
+4. Low-level CDP primitives only when the app/API layer and clear DOM controls are insufficient.
+
+For read, export, download, create, update, publish, and multi-step flows, prefer the page-owned API path whenever it can be understood and verified safely. Verify results through UI refresh plus application/API readback when possible.
 
 ## Operating Loop
 
 1. Classify the task as `read`, `operate`, or `flow`.
-2. Observe the current page before acting: URL, title, visible text, controls, tables, downloads, network clues, and blocking states.
-3. Read business rules before editing: quotas, used/remaining capacity, percentage totals, field validation, permission state, and save semantics.
+2. Connect to the 9222 browser and observe the current page before acting: URL, title, visible text, controls, tables, downloads, network clues, app/framework clues, and blocking states.
+3. Identify the page-owned API/request path first: loaded frontend modules, action wrappers, observed network requests, endpoint shapes, pagination/export/download routes, and required payload fields.
 4. Build a page model that names the user's goal, the relevant objects, safe actions, risks, and success evidence.
-5. Choose the least brittle operation surface. Use DOM controls when they are clear; for complex Next/React/Vue enterprise apps, prefer page-owned frontend API/module wrappers already loaded by the page when they are safer than coordinate, editor-state, or fragile selector work.
-6. Plan small steps with stop conditions. Every planned action needs a readback or verification signal, and ratio/percentage updates must avoid invalid intermediate totals.
-7. Execute one safe action at a time. Re-observe after page transitions, dialogs, downloads, navigation, or re-render.
-8. Verify against evidence, not hope: visible UI state, extracted rows, downloaded files, changed URL, success messages, stable network results, or application readback. Use double verification for enterprise form changes: refreshed visible UI plus API/application-state readback when available.
-9. Journal the work. Record observations, plans, actions, verification evidence, failures, and the final reusable workflow notes.
+5. For state-changing work, read business rules before editing: quotas, used/remaining capacity, percentage totals, field validation, permission state, disabled-state rules, and save semantics.
+6. Choose the least brittle API-first operation surface. Use DOM controls only when the API path is unavailable, unsafe, unverifiable, or when visible UI interaction is itself the required task.
+7. Plan small steps with stop conditions. Every planned action needs a readback or verification signal, and ratio/percentage updates must avoid invalid intermediate totals.
+8. Execute one safe action at a time, preferably through the page's own API in the current page context. Re-observe after page transitions, dialogs, downloads, navigation, or re-render.
+9. Verify against evidence, not hope: application/API readback, stable network results, visible UI state after refresh, extracted rows, downloaded files, changed URL, or success messages. Use double verification for state-changing tasks when available.
+10. Journal the work. Record observations, discovered API paths, payload shapes, plans, actions, verification evidence, failures, and the final reusable workflow notes.
 
 Use `scripts/web_agent_protocol.py` for the shared task taxonomy, safety checks, plan template, and evidence journal schema:
 
@@ -50,7 +52,7 @@ python3 scripts/web_agent_protocol.py journal-template "多页面收集详情证
 Use `scripts/web_operator.py` for the normal five-verb web operation protocol:
 
 ```bash
-python3 scripts/web_operator.py observe --url-prefix https://example.com --task "summarize the page" --journal run.json
+python3 scripts/web_operator.py observe --cdp-url http://127.0.0.1:9222 --url-prefix https://example.com --task "summarize the page" --journal run.json
 python3 scripts/web_operator.py act click --url-prefix https://example.com --selector "button.export" --reason "open export menu" --journal run.json
 python3 scripts/web_operator.py act navigate --url-prefix https://example.com --url "https://example.com/report" --reason "open report page" --journal run.json
 python3 scripts/web_operator.py act paginate --url-prefix https://example.com --selector "button.next" --reason "move to next result page" --journal run.json
@@ -67,9 +69,9 @@ python3 scripts/web_operator.py distill --journal run.json --output-dir reusable
 Use `scripts/browser_executor.py` only when you need low-level direct CDP primitives:
 
 ```bash
-python3 scripts/browser_executor.py cdp --url-prefix https://example.com observe
-python3 scripts/browser_executor.py cdp --url-prefix https://example.com eval --script "document.title"
-python3 scripts/browser_executor.py cdp --url-prefix https://example.com capture --capture-mode passive --matches-json '[{"url_contains":"/api/"}]'
+python3 scripts/browser_executor.py cdp --cdp-url http://127.0.0.1:9222 --url-prefix https://example.com observe
+python3 scripts/browser_executor.py cdp --cdp-url http://127.0.0.1:9222 --url-prefix https://example.com eval --script "document.title"
+python3 scripts/browser_executor.py cdp --cdp-url http://127.0.0.1:9222 --url-prefix https://example.com capture --capture-mode passive --matches-json '[{"url_contains":"/api/"}]'
 ```
 
 Use crawshrimp-compatible execution helpers when reusing or distilling adapter-shaped work:
@@ -109,9 +111,9 @@ This skill mirrors the main crawshrimp execution surfaces in reusable form:
 
 Default to safe, reversible, or read-only actions. Stop and ask the user before submit, publish, send, delete, pay, purchase, confirm, bulk modify, or any action with external side effects.
 
-Do not treat a filled form as permission to submit it. Filling fields can be safe; sending the form is a separate dangerous action.
+Do not treat a filled form as permission to submit it. Filling fields can be safe; sending the form or calling the equivalent save API is a separate dangerous action.
 
-For enterprise forms, final save or submit is dangerous unless the user explicitly authorizes that exact change. If authorization is already explicit in the conversation, proceed with a journaled action and immediate readback.
+For any final save, submit, publish, or externally visible mutation, require explicit authorization for that exact change unless the user's instruction already gives it. If authorization is already explicit in the conversation, proceed with a journaled API-first action and immediate readback.
 
 ## Reference Map
 
@@ -119,7 +121,7 @@ For enterprise forms, final save or submit is dangerous unless the user explicit
 - Read `references/page-observation.md` when the page is unknown or dynamic and needs a durable page model.
 - Read `references/task-planning.md` when converting a user goal into small web actions.
 - Read `references/action-primitives.md` before clicking, typing, selecting, downloading, uploading, waiting, or navigating.
-- Read `references/network-intelligence.md` when deciding whether to inspect requests or stay DOM-first.
+- Read `references/network-intelligence.md` when finding the page-owned API/request path before falling back to DOM actions.
 - Read `references/browser-execution.md` before using direct Chrome/CDP, `observe / act / verify / journal / distill`, or low-level request capture.
 - Read `references/enterprise-form-workflows.md` before editing authenticated internal forms, quotas, percentages, allocations, approval flows, or other enterprise workflow settings.
 - Read `references/verification.md` for structured completion checks.
@@ -132,14 +134,15 @@ For enterprise forms, final save or submit is dangerous unless the user explicit
 ## Common Mistakes
 
 - Acting before observing the page.
-- Opening a fresh browser or extension first for a logged-in internal page instead of checking `http://127.0.0.1:9222`.
+- Opening a fresh browser or extension first instead of checking the user's existing `http://127.0.0.1:9222` browser.
 - Asking the user to log in again after seeing a login page without checking the 9222 CDP browser session.
+- Starting with manual clicks when a page-owned API/request path can solve and verify the task safely.
 - Editing enterprise form values before reading business rules, quotas, used capacity, or total-percentage constraints.
 - Raising percentage items before lowering the oversized item when the form enforces a total cap.
-- Brute-forcing a brittle DOM/coordinate path when the page already exposes a safe frontend API wrapper.
+- Brute-forcing a brittle DOM/coordinate path when the page already exposes a safe frontend API wrapper or request route.
 - Running one large script without readback checkpoints.
 - Treating a clicked button as success without checking resulting state.
 - Submitting, publishing, deleting, sending, paying, or bulk modifying without explicit user confirmation.
-- Claiming an enterprise form change from only one signal; use double verification with refreshed UI and application/API readback when available.
+- Claiming a state-changing task from only one signal; use double verification with application/API readback and refreshed UI when available.
 - Forgetting to record evidence, which makes the workflow impossible to debug or reuse.
 - Stopping at `workflow.md` when the workflow will be repeated; generate a reusable package with `distill --output-dir`.

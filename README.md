@@ -7,8 +7,9 @@
 `crawshrimp-skill` 适合让 AI agent 处理真实浏览器里的网页任务：
 
 - 观察页面：读取 URL、标题、可见文本、按钮、输入框、表格、弹窗、抽屉、危险操作线索、资源请求和框架/store 线索。
-- 安全操作：执行点击、输入、选择、等待、导航、上传、文件选择器上传、下载等动作，每一步都能记录原因和证据。
-- 操作已登录后台：优先连接用户已经打开的 `http://127.0.0.1:9222` CDP 浏览器，复用真实登录态和企业后台会话。
+- 默认复用用户浏览器：所有网页任务优先连接用户已经打开的 `http://127.0.0.1:9222` CDP 浏览器，复用真实登录态、当前 tab 和页面上下文。
+- API 优先操作：先寻找页面自有 API、前端模块、action wrapper 或已观察到的请求路径；点按、输入、坐标和 DOM 操作主要作为 fallback、触发观察或 UI 验证手段。
+- 安全操作：执行 API 调用、点击、输入、选择、等待、导航、上传、文件选择器上传、下载等动作，每一步都能记录原因和证据。
 - 处理企业表单：在编辑配额、百分比、角色分配、审批配置等业务表单前，先读取业务规则、可用额度、校验状态和保存语义。
 - 捕获网络：支持 passive、click、url、wheel 请求捕获，支持 matcher、`min_matches`、`settle_ms`、响应体捕获和 endpoint 分析。
 - 运行抓虾式多阶段脚本：兼容 phase/shared 模式，支持 `cdp_clicks`、`capture_*`、`download_urls`、`download_clicks`、`next_phase`、`complete` 等 runtime action。
@@ -17,7 +18,7 @@
 - 管理下载产物：并发 URL 下载、browser-session 临时 tab 下载、点击下载、文件名匹配、`min_bytes`/`expected_size` 校验和 per-item 错误记录。
 - 沉淀复用流程：从 evidence journal 生成 `workflow.md`、`commands.json`、`run_workflow.py`、可选 `SKILL.md` 和 adapter draft 包。
 
-最终效果：agent 可以从“打开一个陌生后台页面”开始，逐步摸清页面结构和接口线索，安全地完成筛选、翻页、打开详情、导出、上传、下载等任务，并把成功路线变成下次可以直接复跑或改造成 adapter 的材料。
+最终效果：agent 可以从“用户已经打开的 9222 浏览器页面”开始，逐步摸清页面结构和接口线索，优先通过页面自有 API 安全地完成读取、筛选、翻页、打开详情、导出、上传、下载、保存等任务，并把成功路线变成下次可以直接复跑或改造成 adapter 的材料。
 
 ## 能力补齐状态
 
@@ -33,9 +34,9 @@
 - Upload：file input 和 file chooser 上传都会在触发 CDP 前校验本地文件存在。
 - Workflow replay：保留并复放 clicks、wheels、matchers、files、expected-file、timeout。
 - Adapter draft：`distill --include-adapter-draft` 生成可审查的 `manifest.yaml`、JS 草稿和说明。
-- Enterprise form workflow：新增企业后台表单操作参考，要求优先使用 9222 登录态、读取业务规则、规划百分比/配额更新顺序，并通过刷新后的 UI 与应用/API readback 做双重验证。
-- Browser execution：补充 9222 默认入口、页面自有 API/模块包装器使用边界，以及“不导出 cookie/token/auth header”的凭证安全规则。
-- Quick validation：新增结构校验和单元测试，确保企业表单参考文档与 `SKILL.md` 关键术语不会被后续改动漏掉。
+- Enterprise form workflow：新增企业表单操作参考，要求读取业务规则、规划百分比/配额更新顺序，并通过刷新后的 UI 与应用/API readback 做双重验证。
+- Browser execution：补充全任务 9222 默认入口、API 优先操作面、页面自有 API/模块包装器使用边界，以及“不导出 cookie/token/auth header”的凭证安全规则。
+- Quick validation：新增结构校验和单元测试，确保 9222 全局默认、API 优先、企业表单参考文档与 `SKILL.md` 关键术语不会被后续改动漏掉。
 
 仍然不包含完整抓虾桌面应用里的 GUI、任务队列、账号管理、平台内置 adapter 集合、数据导出 UI 或桌面发布流程。这些属于宿主应用层，不在本 skill 的边界内。
 
@@ -53,7 +54,7 @@ python3 -m pip install -r requirements.txt
   --user-data-dir=/tmp/crawshrimp-skill-chrome
 ```
 
-打开目标网页并完成登录后，后续命令默认连接 `http://127.0.0.1:9222`。如果用户已经准备好了带登录态的 Chrome/CDP 会话，优先复用该会话；看到登录页时，先检查 9222 里是否已有同域名的已登录 tab，不要直接切到全新浏览器或要求用户重新登录。
+所有任务默认连接 `http://127.0.0.1:9222`。如果用户已经准备好了 Chrome/CDP 会话，优先复用该会话里的当前页面、登录态和前端运行上下文；看到登录页时，先检查 9222 里是否已有同域名的可用 tab，不要直接切到全新浏览器或要求用户重新登录。
 
 ### 1. 先判断任务类型
 
@@ -87,7 +88,7 @@ python3 scripts/web_operator.py snapshot \
 
 `observe` 给出规范化页面模型；`snapshot` 更适合 probe 前判断 framework、store 和 network 线索。
 
-企业或内部后台任务要先确认账号、工作区、目标记录、生产/测试环境、当前值和业务规则。涉及配额、百分比总和、可用量、审批状态、发布状态的页面，不要先改字段；先把规则和保存语义写进 journal。
+观察不是为了马上点按钮，而是为了找到稳定的页面自有 API 路径：前端模块、action wrapper、请求 endpoint、payload shape、分页/导出/下载路由和应用状态 readback。涉及配额、百分比总和、可用量、审批状态、发布状态的页面，不要先改字段；先把规则和保存语义写进 journal。
 
 ### 3. 小步执行动作
 
@@ -128,9 +129,9 @@ python3 scripts/web_operator.py act download \
   --journal run.json
 ```
 
-原则：每次只做一个动作；页面跳转、弹窗出现、表格刷新、文件下载后都要重新观察或验证。
+原则：优先用页面自己的 API、模块函数、action wrapper 或 in-page `fetch` 解决任务；每次只做一个动作；页面跳转、弹窗出现、表格刷新、文件下载后都要重新观察或验证。
 
-复杂 React/Vue/Next 后台如果 DOM 编辑不稳定，可以在页面上下文内使用前端已经加载的应用 API、模块函数或请求 wrapper。这样做的前提是：用户已经明确授权对应外部效果，请求属于当前页面应用，payload 结构来自页面代码、禁用态规则或已观察到的网络行为，并且 cookie、token、auth header、localStorage、sessionStorage 等凭证始终留在页面上下文内，不打印、不落盘、不写进 journal。
+如果可通过页面自有 API 完成，就不要优先走点击、输入或坐标操作。使用 API 路径的前提是：请求属于当前页面应用，payload 结构来自页面代码、禁用态规则或已观察到的网络行为，并且 cookie、token、auth header、localStorage、sessionStorage 等凭证始终留在页面上下文内，不打印、不落盘、不写进 journal。只有当 API 路径不可得、不安全、无法验证，或用户明确要求人工可见交互时，才回落到 DOM/点按操作。
 
 ### 4. 验证结果
 
@@ -152,7 +153,7 @@ python3 scripts/web_operator.py verify \
 
 支持的结构化验证：`text`、`url`、`selector-exists`、`table-rows-min`、`file-exists`。也可以用 `--expression` 写 JS 断言。
 
-企业表单保存后使用双重验证：刷新或重新观察可见 UI，确认目标值已经显示；再用应用/API readback、页面状态或稳定网络结果确认服务端已持久化。百分比或配额类表单要在 journal 里记录旧值、新值、目标总和和更新顺序，例如先降低超额项，再提高其他项，避免中间状态触发总量上限。
+状态变更后尽量使用双重验证：用应用/API readback、页面状态或稳定网络结果确认服务端已持久化；再刷新或重新观察可见 UI，确认目标值已经显示。百分比或配额类表单要在 journal 里记录旧值、新值、目标总和和更新顺序，例如先降低超额项，再提高其他项，避免中间状态触发总量上限。
 
 ### 5. 捕获网络和生成 probe bundle
 
@@ -273,7 +274,7 @@ python3 scripts/workflow_builder.py \
 
 填写表单不等于允许提交表单。提交、发布、删除、付款等动作必须单独确认。
 
-企业后台的保存/提交也按危险动作处理，除非用户已经在当前对话里明确授权了具体变更。使用页面自有 API 或 in-page `fetch` 保存时，只记录脱敏后的 endpoint、payload 形状、响应状态和业务字段；不要读取、复制、复用或持久化任何凭证。
+保存、提交、发布和任何对外部系统产生影响的 API 调用都按危险动作处理，除非用户已经在当前对话里明确授权了具体变更。使用页面自有 API 或 in-page `fetch` 保存时，只记录脱敏后的 endpoint、payload 形状、响应状态和业务字段；不要读取、复制、复用或持久化任何凭证。
 
 ## 项目结构
 
