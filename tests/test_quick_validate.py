@@ -58,6 +58,23 @@ observe act verify journal distill dangerous
         self.assertIn("SKILL.md missing term: request path", errors)
         self.assertIn("SKILL.md missing term: double verification", errors)
 
+    def test_requires_proactive_connection_refused_recovery_terms(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = make_skill_root(tmp, VALID_SKILL)
+
+            errors = quick_validate.validate(root)
+
+        self.assertIn("SKILL.md missing term: connection refused", errors)
+        self.assertIn("SKILL.md missing term: dedicated Chrome", errors)
+        self.assertIn(
+            "references/browser-execution.md missing recovery term: connection refused",
+            errors,
+        )
+        self.assertIn(
+            "references/browser-execution.md missing recovery term: remote-debugging-port=9222",
+            errors,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

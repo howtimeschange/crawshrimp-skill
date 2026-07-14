@@ -15,6 +15,7 @@ REQUIRED_FILES = [
     "scripts/web_agent_protocol.py",
     "scripts/adapter_registry.py",
     "scripts/browser_executor.py",
+    "scripts/ensure_cdp_browser.py",
     "scripts/knowledge_service.py",
     "scripts/phase_runner.py",
     "scripts/probe_bundle.py",
@@ -46,6 +47,19 @@ REQUIRED_SKILL_TERMS = [
     "page-owned API",
     "request path",
     "double verification",
+    "connection refused",
+    "dedicated Chrome",
+]
+
+
+REQUIRED_BROWSER_RECOVERY_TERMS = [
+    "connection refused",
+    "ensure_cdp_browser.py",
+    "/json/version",
+    "/json",
+    "remote-debugging-address=127.0.0.1",
+    "remote-debugging-port=9222",
+    "--user-data-dir",
 ]
 
 
@@ -64,6 +78,13 @@ def validate(root: Path) -> list[str]:
         for term in REQUIRED_SKILL_TERMS:
             if term not in text:
                 errors.append(f"SKILL.md missing term: {term}")
+
+    browser_execution_path = root / "references/browser-execution.md"
+    if browser_execution_path.is_file():
+        text = browser_execution_path.read_text(encoding="utf-8")
+        for term in REQUIRED_BROWSER_RECOVERY_TERMS:
+            if term not in text:
+                errors.append(f"references/browser-execution.md missing recovery term: {term}")
 
     return errors
 

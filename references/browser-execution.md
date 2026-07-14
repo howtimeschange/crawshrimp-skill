@@ -20,6 +20,51 @@ python3 scripts/browser_executor.py cdp --cdp-url http://127.0.0.1:9222 --url-pr
 
 If this lands on a login page or unexpected host, check the 9222 tab list and target host before asking the user to authenticate. A fresh browser, in-app browser, or extension path often lacks the cookies, runtime state, and active page context that the user already prepared.
 
+## 9222 Connection-Refused Recovery
+
+Run this recovery only after the task is classified and the existing endpoint was tried. Probe both `/json/version` and `/json` with a short bounded request. Treat the endpoint as ready only when `/json/version` returns a JSON object with a nonempty `Browser` field and `/json` returns a JSON array.
+
+Prefer the bundled helper for the complete safe recovery loop:
+
+```bash
+python3 scripts/ensure_cdp_browser.py --cdp-url http://127.0.0.1:9222 --timeout-seconds 30
+```
+
+| Probe result | Required behavior |
+| --- | --- |
+| Both endpoints report **connection refused** | Re-probe once immediately. If still refused, proactively launch one dedicated Chrome on 9222, wait for both endpoints to be ready, and resume the original `observe`. Do not ask the user to start Chrome. |
+| Either endpoint times out, returns HTTP 404/non-200, malformed JSON, or partial CDP data | Do not launch or kill anything. Report the port/instance diagnostic; it may be an occupied non-CDP port or an unhealthy Chrome. |
+| CDP is healthy, but login/tab/host is wrong | Do not launch another browser. Resolve the tab/session mismatch through normal observation or ask the user to log in only when needed. |
+
+The automatic recovery is only for a confirmed connection refused state. It is not a generic retry mechanism. Never use `pkill`, close an unknown Chrome, take over a listener, use the default Chrome profile, export credentials, or add permissive remote-origin/web-security flags.
+
+On macOS, use a dedicated skill-owned profile and bind the debug server to loopback:
+
+```bash
+mkdir -p "$HOME/.crawshrimp-skill/chrome-profile"
+nohup "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+  --remote-debugging-address=127.0.0.1 \
+  --remote-debugging-port=9222 \
+  --user-data-dir="$HOME/.crawshrimp-skill/chrome-profile" \
+  --no-first-run \
+  --no-default-browser-check \
+  --new-window about:blank \
+  >"$HOME/.crawshrimp-skill/chrome-9222.log" 2>&1 &
+```
+
+On other systems, locate Chrome or Chromium and keep the same `--remote-debugging-address=127.0.0.1`, `--remote-debugging-port=9222`, and isolated `--user-data-dir` arguments. Before launching, re-probe so a concurrently recovered endpoint is reused; launch at most once for one recovery event.
+
+Wait no more than 30 seconds, then confirm both endpoint shapes before retrying the exact original command:
+
+```bash
+curl --noproxy '*' -fsS --connect-timeout 1 --max-time 2 \
+  http://127.0.0.1:9222/json/version
+curl --noproxy '*' -fsS --connect-timeout 1 --max-time 2 \
+  http://127.0.0.1:9222/json
+```
+
+Record a sanitized journal entry for the probe result, dedicated profile ownership, launch attempt, and ready/failure evidence. A ready new browser can still be unauthenticated; if it reaches a login page, ask the user to authenticate in that visible dedicated browser, then continue. Do not copy cookies or tokens from any other profile.
+
 ## API-First Operation
 
 After observation, prefer the page's own API or request path over manual clicking:
@@ -98,5 +143,6 @@ The higher-level `web_operator.py observe` runs a DOM snapshot and is usually be
 ## Failure Handling
 
 - If CDP reports multiple matching tabs, ask for `--tab-id`.
-- If CDP cannot connect to `http://127.0.0.1:9222`, ask the user to start or expose the prepared Chrome session with remote debugging before falling back to a non-authenticated browser.
+- If both CDP health endpoints specifically report connection refused, follow the dedicated Chrome recovery above instead of asking the user to start Chrome.
+- If 9222 times out, returns 404/non-CDP data, or is only partially healthy, do not start or terminate a browser; preserve the diagnostic and report the blocker.
 - If a page re-renders after an action, discard stale control assumptions and observe again.
