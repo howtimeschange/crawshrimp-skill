@@ -1,12 +1,14 @@
 # Crawshrimp Skill
 
+**[访问抓虾 Harness 官网 · 查看介绍与下载](https://harness.crawshrimp.com/)**
+
 面向 AI agent 的网页自动化运行层。它把抓虾项目里的网页观察、CDP 执行、多阶段运行、网络捕获、下载、证据记录和流程沉淀能力抽成一个独立 skill，让 agent 不只是“写脚本”，而是能像操作者一样理解页面、执行小步动作、验证结果，并把跑通的流程沉淀成可复用资产。
 
 ## 合作交流与赞助
 
 欢迎联系作者，交流「Crawshrimp Skill」的使用与想法、探讨项目合作，或赞助支持项目持续开发。
 
-使用微信扫描下方二维码添加好友，备注「Crawshrimp Skill + 合作 / 交流 / 赞助」即可。此二维码与[抓虾官网](https://crawshrimp.com/)使用的联系方式一致。
+使用微信扫描下方二维码添加好友，备注「Crawshrimp Skill + 合作 / 交流 / 赞助」即可。
 
 <a href="https://crawshrimp.com/wechat-qr.jpg">
   <img src="https://crawshrimp.com/wechat-qr.jpg" alt="作者的微信联系二维码，用于Crawshrimp Skill合作交流与赞助联系" width="280" />
