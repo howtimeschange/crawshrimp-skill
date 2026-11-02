@@ -2,12 +2,31 @@
 
 **[访问抓虾 Harness 官网 · 查看介绍与下载](https://harness.crawshrimp.com/)**
 
-新增可选 JEV 执行模式：在 API 优先探索之后，由本地循环完成有明确范围的 UI
-操作；一次请求同时选择操作和目标，复用 CDP/HTTPS 连接，检查旧页面引用，等待
-分页内容实际更新，并对临时不可用页面刷新一次后回查。已知接口和复用脚本仍由
-代码直接执行。用法和边界见 [JEV mode](references/jev-mode.md)。
-
 面向 AI agent 的网页自动化运行层。它把抓虾项目里的网页观察、CDP 执行、多阶段运行、网络捕获、下载、证据记录和流程沉淀能力抽成一个独立 skill，让 agent 不只是“写脚本”，而是能像操作者一样理解页面、执行小步动作、验证结果，并把跑通的流程沉淀成可复用资产。
+
+## 本次更新：JEV 执行模式（2026-11-02）
+
+参考 [browser-use/jev-ultrafast](https://github.com/browser-use/jev-ultrafast)，新增可选的 `scripts/jev_operator.py`。在 API 优先探索之后，需要通过界面选择下一步时，可由本地循环执行一个有明确范围和验收条件的目标。
+
+- **减少往返**：操作与兼容目标合并到一次 JEV 请求，整段任务复用同一标签页的 CDP WebSocket 和模型 HTTPS 连接。
+- **校验页面和目标**：原子读取控件、数据、进度和完成条件；执行前检查实际 DOM 节点、字段变化、禁用态及遮挡，分页后等待真实数据更新。
+- **恢复临时故障**：遇到 `Page Unavailable` 时刷新一次并回查，必要时恢复目标地址；登录、验证码交回用户处理。
+- **处理不确定性**：低置信度默认交回调用者，可选接入备用模型；执行结果未知时返回 `BROWSER_ACTION_UNCERTAIN`，不自动重放。模型选择 `DONE` 后仍需代码验收。
+- **保留原有流程**：已知页面 API 和已沉淀脚本继续直接执行；JEV 模式不扩大保存、提交、发送、付款等操作权限。
+
+公开图书站实测任务为“依次读取前 3 页、提取 60 本图书，筛选价格 ≤ £20 且评分 ≥ 4 星”，三组各交替运行 3 次：
+
+| 路线 | 完成情况 | 执行中位耗时 | 每次 CDP 连接数 | 3 次运行的备用模型调用总数 |
+| --- | --- | --- | --- | --- |
+| DeepSeek Flash + 每次操作建立 CDP 连接 | 3/3 | 2.022 秒 | 5 | 0 |
+| JEV + 每次操作建立 CDP 连接 | 3/3 | 1.326 秒 | 5 | 2 |
+| 优化后 JEV 持久连接模式 | 3/3 | 0.622 秒 | 1 | 1 |
+
+最终 9/9 次均获得 60 条唯一记录、筛出 6 本，数据哈希一致；独立 HTTP 请求与 HTML 解析逐字段核对 60/60 条一致、0 差异。源码测试 86 项、真实浏览器检查 8 项均通过。
+
+这是页面和模型连接预热后的执行阶段测量，包含模型判断、翻页、页面内提取和终态验证，排除首次探索、初始加载、连接预热、统一去重筛选与写文件。优化模式比 DeepSeek 对照中位耗时减少约 69.2%；不同模型及备用调用次数也影响耗时，不能把全部差异归因于连接复用。这是单个公开静态站点的小规模实验。
+
+接入步骤见下文 [JEV 模式接入指南](#jev-模式接入指南)，设计和执行边界见 [JEV mode](references/jev-mode.md)。
 
 ## 合作交流与赞助
 
@@ -56,6 +75,212 @@
 - Quick validation：新增结构校验和单元测试，确保 9222 全局默认、API 优先、企业表单参考文档与 `SKILL.md` 关键术语不会被后续改动漏掉。
 
 仍然不包含完整抓虾桌面应用里的 GUI、任务队列、账号管理、平台内置 adapter 集合、数据导出 UI 或桌面发布流程。这些属于宿主应用层，不在本 skill 的边界内。
+
+## JEV 模式接入指南
+
+Jev 是 TypeSafe 的结构化决策模型。本项目调用其原生 System One API：发送页面状态及候选操作，接收选项、概率和置信度。接入代码已经包含在本仓库，安装现有 Python 依赖即可使用。
+
+### 1. 需要准备什么
+
+| 项目 | 是否必需 | 提供或准备的内容 |
+| --- | --- | --- |
+| Python 与项目依赖 | 必需 | Python 3.10+，安装 `requirements.txt` |
+| Chrome / Chromium CDP 会话 | 必需 | 默认 `http://127.0.0.1:9222`，以及目标标签页；需要登录的网站先在该浏览器登录 |
+| TypeSafe API Key | 必需 | 自己账号创建、可调用 Jev 的 Key，保存在本机配置文件或环境变量 |
+| API 地址 | 有默认值 | `TYPESAFE_BASE_URL=https://api.typesafe.ai` |
+| 模型名称 | 有默认值 | `TYPESAFE_MODEL=jev-latest`；也可使用账号可访问的固定版本 |
+| 任务与验收要求 | 必需 | 目标 URL、操作范围、要提取的字段、筛选条件、输出格式和停止条件；由调用 agent 观察页面后生成具体参数 |
+| OpenAI-compatible 备用模型 | 可选 | 仅启用低置信度回退时需要另一组 API Key、Base URL 和模型名 |
+
+仅使用 JEV 完成点击、翻页和提取时，一把 TypeSafe Key 即可。需要填写文本时，由调用者通过 `--values-json` 提供确定值，例如 `'{"Search":"poetry"}'`；其中 `Search` 必须是实际观察到的字段名称或引用。
+
+### 2. 如何获取 JEV API Key
+
+1. 打开 [TypeSafe 官网](https://typesafe.ai/)，点击 **API console**，或直接进入 [TypeSafe 控制台](https://console.typesafe.ai/)。
+2. 按页面提示注册或登录自己的 TypeSafe 账号。
+3. 在控制台的 API Key 管理入口创建一把专用于抓虾的 Key，并复制到本机配置文件。登录后的具体菜单名称以当前控制台为准；官方公开 [Quick start](https://docs.typesafe.ai/introduction/quickstart) 指向的就是此控制台入口。
+4. 在控制台确认账号的可用额度、模型权限及调用限额；是否需要充值、可用试用额度与价格均以当前账号页面和 [模型说明](https://docs.typesafe.ai/models) 为准。
+5. 按下一节配置，再执行一次连通性检查。Key 只填密钥本身，客户端会添加 `Authorization: Bearer ...` 请求头。
+
+Key 不需要发到聊天里或提交到 GitHub；交给 agent 的可以是本机配置文件路径。若使用兼容网关，需要该网关同时支持 TypeSafe 的 `state` / `questions` 请求和 `answers` 响应；仅提供聊天接口的地址不能直接作为 JEV 地址。
+
+### 3. 安装依赖并配置凭证
+
+以下命令在仓库根目录执行，适用于 macOS / Linux 的 shell：
+
+```bash
+python3 -m venv .venv
+. .venv/bin/activate
+python3 -m pip install -r requirements.txt
+
+mkdir -p "$HOME/.config/crawshrimp-skill"
+touch "$HOME/.config/crawshrimp-skill/jev.env"
+chmod 600 "$HOME/.config/crawshrimp-skill/jev.env"
+vi "$HOME/.config/crawshrimp-skill/jev.env"
+```
+
+可将 `vi` 换为熟悉的本机编辑器。在配置文件里填写以下内容，将占位符替换成自己的 Key：
+
+```dotenv
+TYPESAFE_API_KEY=replace-with-your-typesafe-key
+TYPESAFE_BASE_URL=https://api.typesafe.ai
+TYPESAFE_MODEL=jev-latest
+```
+
+运行时指定 `--config-file "$HOME/.config/crawshrimp-skill/jev.env"`。未指定时，脚本读取已有的 `~/.config/jev-jarvis/env`；同名进程环境变量优先于文件。配置文件只解析 `KEY=value` 或 `export KEY=value`，不会执行 shell 命令，也不会自动加载仓库中的 `.env`。
+
+`TYPESAFE_BASE_URL` 支持主机地址、带 `/v1` 的地址，或完整兼容动作地址；官方默认地址最终请求 `https://api.typesafe.ai/v1/systemone`。`jev-latest` 会随官方稳定版更新；需要固定结果基线时，可按 [模型文档](https://docs.typesafe.ai/models) 选定版本。
+
+### 4. 检查模型连通性
+
+以下示例会发起一次真实 JEV 请求，按 TypeSafe 当前用量规则计费；只输出模型及决策结果：
+
+```bash
+python3 - <<'PY'
+import json
+from scripts.jev_operator import JevClient, read_config, validate_answer
+
+config = read_config('~/.config/crawshrimp-skill/jev.env')
+if not config.get('TYPESAFE_API_KEY'):
+    raise SystemExit('请先配置 TYPESAFE_API_KEY')
+client = JevClient(config['TYPESAFE_API_KEY'],
+                   config.get('TYPESAFE_BASE_URL', 'https://api.typesafe.ai'),
+                   config.get('TYPESAFE_MODEL', 'jev-latest'))
+choices = {'NEXT': 'Read the next requested page.', 'STOP': 'All requested pages are read.'}
+try:
+    response = client.post({'page': 1, 'goal': 'Read three pages in order.'}, {
+        'next_action': {'type': 'choice', 'instructions': 'Choose the next step.',
+                        'criteria': choices}})
+    answer = validate_answer(response['answers']['next_action'], choices)
+    print(json.dumps({'model': response.get('model'), 'choice': answer['choice'],
+                      'confidence': answer['confidence']}, ensure_ascii=False))
+finally:
+    client.close()
+PY
+```
+
+正常情况下可看到 `model`、`choice`、`confidence`，本例应选择 `NEXT`。这一步验证模型接入；浏览器连接和具体任务结果按下文分别验证。协议参考：[System One API](https://docs.typesafe.ai/api/system-one)、[可用模型查询](https://docs.typesafe.ai/api/list-models)。
+
+### 5. 连接浏览器并运行“翻三页、提取并筛选”
+
+先检查已有 CDP 会话；连接被拒绝、没有监听服务时，辅助脚本会启动专用浏览器并等待就绪：
+
+```bash
+python3 scripts/ensure_cdp_browser.py --cdp-url http://127.0.0.1:9222 --timeout-seconds 30
+```
+
+在这个浏览器中打开 [公开图书测试站第 1 页](https://books.toscrape.com/)，然后获取该页的标签 ID：
+
+```bash
+python3 - <<'PY'
+import json
+from urllib.request import urlopen
+with urlopen('http://127.0.0.1:9222/json', timeout=5) as response:
+    tabs = json.load(response)
+for tab in tabs:
+    if tab.get('type') == 'page' and tab.get('url', '').startswith('https://books.toscrape.com/'):
+        print(tab['id'], tab.get('title'), tab['url'])
+PY
+```
+
+将下面的 `OBSERVED_TAB_ID` 替换成上述实际 ID。这个公开静态站点示例使用已核实的分页区域；其他站点应先做 API 优先探索，再根据真实 DOM 确定范围与表达式。
+
+```bash
+mkdir -p artifacts
+python3 scripts/jev_operator.py \
+  --config-file "$HOME/.config/crawshrimp-skill/jev.env" \
+  --cdp-url http://127.0.0.1:9222 \
+  --tab-id OBSERVED_TAB_ID \
+  --url-prefix https://books.toscrape.com/ \
+  --goal 'Read pages one through three in order. Stop on page three. Only use the next-page link.' \
+  --scope-selector '.pager' \
+  --dom-fallback-reason 'This public static site exposes HTML pagination links, no page-owned data API.' \
+  --verify-expression "location.pathname.endsWith('/page-3.html') && document.querySelectorAll('article.product_pod').length === 20" \
+  --progress-expression "JSON.stringify([...document.querySelectorAll('article.product_pod h3 a')].map(a=>a.href))" \
+  --observation-expression "({page:location.href,rows:[...document.querySelectorAll('article.product_pod')].map(el=>({
+    title:el.querySelector('h3 a').title,url:el.querySelector('h3 a').href,
+    price_gbp:Number(el.querySelector('.price_color').innerText.replace(/[^0-9.]/g,'')),
+    stars:['Zero','One','Two','Three','Four','Five'].indexOf([...el.querySelector('.star-rating').classList].find(c=>c!=='star-rating'))}))})" \
+  --max-steps 10 \
+  --journal artifacts/books-jev.jsonl \
+  > artifacts/books-jev-result.json
+```
+
+程序将原子观察得到的图书记录放在结果的 `observations[].data.rows` 中，可能包含等待阶段的重复记录。继续用确定代码去重、验收 3 页共 60 条，并筛选价格 ≤ £20、评分 ≥ 4 星：
+
+```bash
+python3 - <<'PY'
+import csv
+import json
+from pathlib import Path
+
+result = json.loads(Path('artifacts/books-jev-result.json').read_text())
+if result['status'] != 'complete':
+    raise SystemExit('任务需接管：' + result.get('reason', ''))
+books, pages = {}, set()
+for observation in result['observations']:
+    data = observation.get('data') or {}
+    if data.get('rows'):
+        pages.add(data['page'])
+        books.update((row['url'], row) for row in data['rows'])
+expected = {'https://books.toscrape.com/',
+            'https://books.toscrape.com/catalogue/page-2.html',
+            'https://books.toscrape.com/catalogue/page-3.html'}
+if pages != expected or len(books) != 60:
+    raise SystemExit(f'采集验收未通过：{len(pages)} 页，{len(books)} 条唯一记录')
+selected = sorted((b for b in books.values() if b['price_gbp'] <= 20 and b['stars'] >= 4),
+                  key=lambda b: b['price_gbp'])
+Path('artifacts/books-all.json').write_text(
+    json.dumps(list(books.values()), ensure_ascii=False, indent=2), encoding='utf-8')
+with Path('artifacts/books-filtered.csv').open('w', newline='', encoding='utf-8-sig') as handle:
+    writer = csv.DictWriter(handle, fieldnames=['title', 'price_gbp', 'stars', 'url'])
+    writer.writeheader()
+    writer.writerows(selected)
+print(f'已采集 {len(books)} 本，筛选出 {len(selected)} 本；结果已写入 artifacts/')
+PY
+```
+
+输出为全部记录 `artifacts/books-all.json`、可用 Excel 打开的筛选表 `artifacts/books-filtered.csv`，以及过程日志 `artifacts/books-jev.jsonl`。本次测试筛出 6 本。需要原生 `.xlsx` 时，由调用 agent 在采集验收后另行转换。
+
+`--scope-selector` 限定可操作区域；`--progress-expression` 用真实行 ID 或数据判断刷新；`--verify-expression` 证明终态，最终再检查跨页记录。表达式由调用 agent 根据观察编写，本地执行；JEV 只选已有引用。结果 `status=complete` 时退出码为 0，`handoff` 时为 2，应查看 `reason` 后接管；初始配置或连接错误也可能直接以异常退出。
+
+### 6. 可选：低置信度时使用备用模型
+
+在同一个本机配置文件中额外填写服务商提供的 OpenAI-compatible 配置：
+
+```dotenv
+OPENAI_API_KEY=replace-with-your-fallback-key
+OPENAI_BASE_URL=https://your-provider.example/v1
+OPENAI_MODEL=replace-with-your-model-id
+```
+
+然后在运行命令中追加 `--fallback-on-uncertainty`。备用 Key 从所选模型服务商获取；`OPENAI_BASE_URL` 和 `OPENAI_MODEL` 也使用该服务商的实际值。若模型要求额外参数，可增加 `OPENAI_EXTRA_BODY='{}'` 并填入其支持的 JSON 对象。
+
+默认置信度阈值为 0.8；未启用回退时，低于阈值交回调用者。启用后，备用模型也只能选择同一组已观察的操作和目标 ID，仍需通过 DOM 检查和独立验收。其概率字段是格式适配值，不是校准后的模型置信度；调用次数和耗时计入结果的 `fallback_calls`、`model_calls`、`model_ms`。当前回退只处理低置信度，不处理登录、验证码或接口故障。
+
+### 7. 交给 AI Agent 的任务说明与排错
+
+可以这样描述任务，凭证留在本机：
+
+```text
+请使用本项目抓虾 skill。JEV 配置文件在 ~/.config/crawshrimp-skill/jev.env，
+浏览器 CDP 为 http://127.0.0.1:9222，目标 https://books.toscrape.com/。
+依次读取前 3 页，提取标题、价格 GBP、星级、链接；筛选价格不超过 £20 且至少 4 星。
+先按 skill 做 API 优先探索，需要 UI 操作时用 JEV 模式；最终验证 60 条唯一记录并导出表格。
+请从页面观察确定标签 ID、操作范围和验收表达式，不输出密钥。
+```
+
+| 现象 | 处理方式 |
+| --- | --- |
+| 提示未配置 `TYPESAFE_API_KEY` | 检查 `--config-file` 路径及变量名，确认已替换占位符；检查是否有同名环境变量覆盖文件 |
+| HTTP 401 | 检查 Key 是否有效、是否已撤销；Key 值不包含 `Bearer ` 前缀 |
+| HTTP 400 / 422 或模型不可用 | 对照 [请求与错误文档](https://docs.typesafe.ai/api/errors) 检查协议、模型名与上下文大小；缩小页面范围 |
+| HTTP 429 / 529 | 等待退避，核对控制台限额；当前客户端会对 429 / 503 / 529 最多尝试 3 次，仍失败则交回调用者 |
+| 找不到标签页或同域名匹配多个标签页 | 重新枚举 9222 标签页，指定准确 `--tab-id`；确认目标页就在这个 CDP 浏览器中 |
+| 旧引用、内容无进展或目标被遮挡 | 重新观察页面，核对范围、进度表达式和实际结果数据；不要盲目重试相同动作 |
+| `Page Unavailable` | 执行器仅刷新并恢复一次；仍不可用时检查站点状态 |
+| 登录页 / 验证码 | 在同一个浏览器中由用户完成，重新观察后继续 |
+| `BROWSER_ACTION_UNCERTAIN` | 先回查原动作是否成功，结果明确前不要重放 |
 
 ## AI Agent 使用手册
 
@@ -303,6 +528,7 @@ crawshrimp-skill/
   agents/openai.yaml
   references/
     enterprise-form-workflows.md
+    jev-mode.md
   scripts/
     web_agent_protocol.py
     adapter_registry.py
@@ -312,9 +538,12 @@ crawshrimp-skill/
     phase_runner.py
     runtime_downloads.py
     web_operator.py
+    jev_operator.py
+    jev_snapshot.js
     workflow_builder.py
   tests/
     test_quick_validate.py
+    test_jev_operator.py
   quick_validate.py
 ```
 
@@ -327,4 +556,4 @@ python3 quick_validate.py .
 python3 -m compileall scripts tests quick_validate.py
 ```
 
-当前测试覆盖协议、CDP backend、web operator、phase runner、runtime downloads、adapter registry、knowledge/probe 和 workflow builder。
+当前测试覆盖协议、CDP backend、web operator、phase runner、runtime downloads、adapter registry、knowledge/probe、workflow builder 和 JEV 决策/执行循环。
