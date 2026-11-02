@@ -58,6 +58,16 @@ Do not default to manual page clicking. Use an API-first approach: first observe
 
 For read, export, download, create, update, publish, and multi-step flows, prefer the page-owned API path whenever it can be understood and verified safely. Verify results through UI refresh plus application/API readback when possible.
 
+## Optional JEV Mode
+
+After API-first exploration, use `scripts/jev_operator.py` for a bounded UI fallback
+goal whose safe control scope and independent completion proof are known. Read
+`references/jev-mode.md` first. It keeps one exact-tab CDP connection, batches
+operation/target questions into one JEV request, validates live node references,
+waits for result-data changes, and performs a single verified temporary-page recovery.
+Known API workflows and distilled scripts should run directly without JEV. Do not
+use JEV confidence or `DONE` as permission or completion evidence.
+
 ## Operating Loop
 
 1. Classify the task as `read`, `operate`, or `flow`.
